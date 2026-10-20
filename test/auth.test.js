@@ -106,11 +106,33 @@ describe('6. protected routes, CSRF and sessions', () => {
     // Replay the old (already rotated) refresh token after the grace window.
     const { Session } = await import('../src/models/index.js');
     const { sha256 } = await import('../src/utils/tokens.js');
-    await Session.updateOne({ tokenHash: sha256(oldRt.split('=')[1]) }, { $set: { revokedAt: new Date(Date.now() - 60_000) } });
+    await Session.updateOne({ tokenHash: sha256(oldRt.split('=')[1]) }, { $set: { revokedAt: new Date(Date.now() - 60_000), rotatedAt: new Date(Date.now() - 60_000) } });
     const replay = await request(app.server).post('/api/auth/refresh').set('Cookie', `${oldRt}; qz_csrf=abc`).set('X-CSRF-Token', 'abc');
     expect(replay.status).toBe(401);
     // whole family is now dead, including the newest token
     expect((await h.get('/api/auth/me')).status).toBe(401);
+  });
+  it('a token revoked by logout/admin is rejected at once as expired (no refresh grace window)', async () => {
+    const h = await newHost(app);
+    const rt = h.cookie.split('; ').find((c) => c.startsWith('qz_rt='));
+    const { User } = await import('../src/models/index.js');
+    const { revokeAllForUser } = await import('../src/services/authService.js');
+    await revokeAllForUser((await User.findOne({ email: h.email }))._id);
+    const r = await request(app.server).post('/api/auth/refresh').set('Cookie', `${rt}; qz_csrf=abc`).set('X-CSRF-Token', 'abc');
+    expect(r.status).toBe(401);
+    expect(r.body.error.code).toBe('SESSION_EXPIRED'); // not REFRESH_CONFLICT
+    expect(r.headers['set-cookie'].join(';')).toMatch(/qz_at=;/); // cookies cleared
+  });
+  it('two tabs refreshing at once is a harmless conflict, not a sign-out', async () => {
+    const h = await newHost(app);
+    const rt = h.cookie.split('; ').find((c) => c.startsWith('qz_rt='));
+    const call = () => request(app.server).post('/api/auth/refresh').set('Cookie', `${rt}; qz_csrf=abc`).set('X-CSRF-Token', 'abc');
+    const first = await call();
+    const second = await call();
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(401);
+    expect(second.body.error.code).toBe('REFRESH_CONFLICT');
+    expect(second.headers['set-cookie']).toBeUndefined(); // cookies untouched
   });
   it('logout invalidates the session server-side', async () => {
     const h = await newHost(app);

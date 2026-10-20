@@ -8,6 +8,7 @@ const sessionSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true },
   expiresAt: { type: Date, required: true },
   revokedAt: { type: Date, default: null },
+  rotatedAt: { type: Date, default: null }, // set only when replaced by refresh rotation (vs. revoked by logout/admin)
   userAgent: { type: String, maxlength: 300 },
 }, { timestamps: true });
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 7 * 24 * 3600 });

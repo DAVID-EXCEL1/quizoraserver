@@ -309,3 +309,19 @@ async function dispatchHostAction(code, hostId, action) {
     default: throw new AppError(400, 'BAD_ACTION', 'Unknown action');
   }
 }
+
+/** Admin/system-initiated shutdown of a live room. Atomic, so concurrent calls are harmless. */
+export async function forceExpireRoom(roomId, reason) {
+  const now = new Date();
+  const room = await Room.findOneAndUpdate(
+    { _id: roomId, status: { $in: LIVE } },
+    { $set: { status: 'EXPIRED', expiredAt: now, expiredReason: reason, purgeAt: new Date(now.getTime() + env.finishedRoomRetentionMs) } },
+    { new: true },
+  );
+  if (!room) return null;
+  clearRoomTimer(roomId);
+  await Player.updateMany({ roomId }, { $unset: { tokenHash: 1, tokenExpiresAt: 1 }, $set: { connected: false } });
+  toGame(roomId, 'room:expired', { reason });
+  toHostCtl(roomId, 'room:expired', { reason });
+  return room;
+}

@@ -6,3 +6,4 @@ export { Room } from './Room.js';
 export { Player } from './Player.js';
 export { Answer } from './Answer.js';
 export { GameResult } from './GameResult.js';
+export { AuditLog } from './AuditLog.js';

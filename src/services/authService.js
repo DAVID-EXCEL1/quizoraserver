@@ -13,7 +13,7 @@ const VERIFY_TTL = 24 * 3600 * 1000;
 const RESET_TTL = 60 * 60 * 1000;
 
 export const publicUser = (u) => ({
-  id: String(u._id), fullName: u.fullName, email: u.email, emailVerified: !!u.emailVerified, status: u.status,
+  id: String(u._id), fullName: u.fullName, email: u.email, emailVerified: !!u.emailVerified, status: u.status, role: u.role || 'host',
   createdAt: u.createdAt,
 });
 
@@ -54,12 +54,16 @@ export async function refresh(rawRefresh, ctx) {
   if (!session) throw unauthorized('Session expired', 'SESSION_EXPIRED');
   if (session.expiresAt <= new Date()) throw unauthorized('Session expired', 'SESSION_EXPIRED');
   if (session.revokedAt) {
-    // A second tab racing a rotation is normal; an old token replayed later is theft.
-    if (Date.now() - +session.revokedAt < 10_000) throw unauthorized('Session was just refreshed', 'REFRESH_CONFLICT');
-    await revokeFamily(session.familyId);
+    if (session.rotatedAt) {
+      // A second tab racing a rotation is normal; a rotated token replayed later is theft.
+      if (Date.now() - +session.rotatedAt < 10_000) throw unauthorized('Session was just refreshed', 'REFRESH_CONFLICT');
+      await revokeFamily(session.familyId);
+    }
+    // Revoked by logout, password change or an admin: gone immediately, no grace.
     throw unauthorized('Session expired', 'SESSION_EXPIRED');
   }
-  const rotated = await Session.findOneAndUpdate({ _id: session._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
+  const now = new Date();
+  const rotated = await Session.findOneAndUpdate({ _id: session._id, revokedAt: null }, { $set: { revokedAt: now, rotatedAt: now } });
   if (!rotated) throw unauthorized('Session was just refreshed', 'REFRESH_CONFLICT');
   const user = await User.findById(session.userId).lean();
   if (!user || user.status !== 'active') { await revokeFamily(session.familyId); throw unauthorized('Account unavailable'); }

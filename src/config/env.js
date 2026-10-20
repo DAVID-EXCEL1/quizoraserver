@@ -14,17 +14,17 @@ function secret(name, devFallback) {
   return devFallback;
 }
 
-const clientUrl = trimSlash(e.CLIENT_URL || 'https://quizora-game.vercel.app');
+const clientUrl = trimSlash(e.CLIENT_URL || 'http://localhost:5173');
 const sameSite = (e.COOKIE_SAMESITE || 'lax').toLowerCase();
 
 export const env = {
   nodeEnv,
   isProd,
   isTest: nodeEnv === 'test',
-  port: num(e.PORT, 4001),
+  port: num(e.PORT, 4000),
   mongoUri: e.MONGODB_URI || 'mongodb://127.0.0.1:27017/quizora',
   clientUrl,
-  serverUrl: trimSlash(e.SERVER_URL || `http://localhost:${num(e.PORT, 4001)}`),
+  serverUrl: trimSlash(e.SERVER_URL || `http://localhost:${num(e.PORT, 4000)}`),
   allowedOrigins: (e.CORS_ORIGINS || clientUrl).split(',').map((s) => trimSlash(s.trim())).filter(Boolean),
   trustProxy: num(e.TRUST_PROXY, 0),
 

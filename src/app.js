@@ -12,6 +12,7 @@ import roomRoutes from './routes/rooms.js';
 import gameRoutes from './routes/games.js';
 import dashboardRoutes from './routes/dashboard.js';
 import uploadRoutes from './routes/uploads.js';
+import adminRoutes from './routes/admin.js';
 
 export function createApp() {
   const app = express();
@@ -33,6 +34,7 @@ export function createApp() {
   app.use('/api/rooms', roomRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/uploads', uploadRoutes);
+  app.use('/api/admin', adminRoutes);
   app.use('/api', gameRoutes); // /games, /games/:id, /results/:code
 
   app.use(notFoundHandler);
