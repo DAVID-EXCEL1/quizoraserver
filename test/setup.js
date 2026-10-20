@@ -8,4 +8,4 @@ process.env.BCRYPT_ROUNDS = '4';
 process.env.RATE_LIMIT_DISABLED ??= 'true';
 process.env.SCORING_DELAY_MS = '25';
 process.env.DEADLINE_GRACE_MS = '100';
-process.env.CLIENT_URL = 'http://localhost:5174';
+process.env.CLIENT_URL = 'https://quizora-game.vercel.app';
