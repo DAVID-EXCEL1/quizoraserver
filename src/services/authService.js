@@ -13,7 +13,7 @@ const VERIFY_TTL = 24 * 3600 * 1000;
 const RESET_TTL = 60 * 60 * 1000;
 
 export const publicUser = (u) => ({
-  id: String(u._id), fullName: u.fullName, email: u.email, emailVerified: !!u.emailVerified, status: u.status, role: u.role || 'host',
+  id: String(u._id), fullName: u.fullName, email: u.email, emailVerified: !!u.emailVerified, status: u.status, role: u.role || 'host', sticker: u.sticker || '',
   createdAt: u.createdAt,
 });
 

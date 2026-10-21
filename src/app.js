@@ -13,6 +13,8 @@ import gameRoutes from './routes/games.js';
 import dashboardRoutes from './routes/dashboard.js';
 import uploadRoutes from './routes/uploads.js';
 import adminRoutes from './routes/admin.js';
+import aiRoutes from './routes/ai.js';
+import billingRoutes, { paystackWebhook, publicConfig } from './routes/billing.js';
 
 export function createApp() {
   const app = express();
@@ -24,6 +26,7 @@ export function createApp() {
     credentials: true,
     allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Player-Token', 'Authorization'],
   }));
+  app.post('/api/webhooks/paystack', paystackWebhook); // raw body, before the JSON parser
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
@@ -35,6 +38,9 @@ export function createApp() {
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/billing', billingRoutes);
+  app.use('/api/ai', aiRoutes);
+  app.get('/api/config', publicConfig);
   app.use('/api', gameRoutes); // /games, /games/:id, /results/:code
 
   app.use(notFoundHandler);

@@ -10,6 +10,7 @@ import * as v from '../validators/auth.js';
 import { asyncHandler, ok } from '../utils/misc.js';
 import { randomToken } from '../utils/tokens.js';
 import { emailConfigured } from '../services/mailer.js';
+import { assertValidSticker } from '../services/stickers.js';
 
 const r = Router();
 const base = () => ({ httpOnly: true, secure: env.cookie.secure, sameSite: env.cookie.sameSite, domain: env.cookie.domain });
@@ -95,7 +96,11 @@ r.use(requireAuth, csrfProtect);
 r.get('/me', (req, res) => ok(res, { user: auth.publicUser(req.user), emailDeliveryConfigured: emailConfigured() }));
 
 r.patch('/me', validate(v.profileSchema), asyncHandler(async (req, res) => {
-  const user = await User.findByIdAndUpdate(req.user._id, { $set: { fullName: req.valid.body.fullName } }, { new: true });
+  const set = {};
+  if (req.valid.body.fullName !== undefined) set.fullName = req.valid.body.fullName;
+  if (req.valid.body.sticker !== undefined) set.sticker = await assertValidSticker(req.valid.body.sticker);
+  await User.updateOne({ _id: req.user._id }, { $set: set });
+  const user = await User.findById(req.user._id);
   ok(res, { user: auth.publicUser(user) });
 }));
 

@@ -2,6 +2,7 @@ import { Quiz } from '../models/index.js';
 import { AppError, notFound } from '../utils/errors.js';
 import { escapeRegex } from '../utils/misc.js';
 import { publishProblems } from '../validators/quiz.js';
+import { entitlementsFor, limitReached, planLimit } from './entitlements.js';
 
 const summary = (q) => ({
   id: String(q._id), title: q.title, description: q.description, status: q.status,
@@ -33,9 +34,25 @@ export async function list(ownerId, { page, limit, search, status }) {
   return { items: items.map(summary), total, page, pages: Math.max(1, Math.ceil(total / limit)) };
 }
 
-export const create = async (ownerId, data) => fullQuiz(await Quiz.create({ ...data, ownerId, status: 'draft' }));
+async function assertCanAddQuiz(ownerId, ent) {
+  if (limitReached(ent.limits.maxQuizzes, await Quiz.countDocuments({ ownerId }))) {
+    throw planLimit('maxQuizzes', ent.limits.maxQuizzes, `Your ${ent.plan.name} plan allows ${ent.limits.maxQuizzes} quizzes. Upgrade to create more.`);
+  }
+}
+function assertQuestionCount(ent, n) {
+  const max = ent.limits.maxQuestionsPerQuiz;
+  if (max !== -1 && n > max) throw planLimit('maxQuestionsPerQuiz', max, `Your ${ent.plan.name} plan allows ${max} questions per quiz. Remove some or upgrade.`);
+}
+
+export async function create(ownerId, data) {
+  const ent = await entitlementsFor(ownerId);
+  await assertCanAddQuiz(ownerId, ent);
+  assertQuestionCount(ent, data.questions.length);
+  return fullQuiz(await Quiz.create({ ...data, ownerId, status: 'draft' }));
+}
 
 export async function update(ownerId, id, data) {
+  assertQuestionCount(await entitlementsFor(ownerId), data.questions.length);
   const quiz = await getOwned(ownerId, id);
   quiz.title = data.title;
   quiz.description = data.description;
@@ -48,6 +65,7 @@ export async function update(ownerId, id, data) {
 export async function setStatus(ownerId, id, status) {
   const quiz = await getOwned(ownerId, id);
   if (status === 'published') {
+    assertQuestionCount(await entitlementsFor(ownerId), quiz.questions.length);
     const problems = publishProblems(quiz);
     if (problems.length) throw new AppError(422, 'QUIZ_INCOMPLETE', 'This quiz is not ready to publish', { problems });
   }
@@ -58,6 +76,7 @@ export async function setStatus(ownerId, id, status) {
 
 export async function duplicate(ownerId, id) {
   const src = await getOwned(ownerId, id);
+  await assertCanAddQuiz(ownerId, await entitlementsFor(ownerId));
   const copy = await Quiz.create({
     ownerId, title: `${src.title} (copy)`.slice(0, 100), description: src.description, status: 'draft',
     questions: src.questions.map((q) => ({

@@ -1,4 +1,4 @@
-import { Room, Player, Answer } from '../models/index.js';
+import { Room, Player, Answer, ChatMessage } from '../models/index.js';
 import { env } from '../config/env.js';
 import { log } from '../utils/logger.js';
 import { closeQuestion, scoreQuestion, ensureGameResult, clearRoomTimer } from '../services/gameService.js';
@@ -47,6 +47,7 @@ export async function runExpiry() {
   if (old.length) {
     const ids = old.map((r) => r._id);
     await Answer.deleteMany({ roomId: { $in: ids } });
+    await ChatMessage.deleteMany({ roomId: { $in: ids } });
     await Player.deleteMany({ roomId: { $in: ids } });
     await Room.deleteMany({ _id: { $in: ids } });
   }

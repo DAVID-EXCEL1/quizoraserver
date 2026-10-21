@@ -87,3 +87,33 @@ export const once = (s, evt, ms = 4000) => new Promise((res, rej) => {
 });
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 export { request };
+
+/** Replace global fetch for specific outbound URLs (Paystack/Groq/Pexels); everything else passes through. */
+export function mockFetch(handlers) {
+  const real = globalThis.fetch; const calls = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    for (const [rx, fn] of handlers) {
+      if (!rx.test(u)) continue;
+      const body = opts.body && typeof opts.body === 'string' ? JSON.parse(opts.body) : undefined;
+      calls.push({ url: u, method: opts.method || 'GET', body, headers: opts.headers });
+      const out = await fn({ url: u, body, headers: opts.headers });
+      return new Response(JSON.stringify(out.body ?? out), { status: out.status || 200, headers: { 'content-type': 'application/json' } });
+    }
+    return real(url, opts);
+  };
+  return { calls, restore: () => { globalThis.fetch = real; } };
+}
+
+/** Minimal valid multi-line PDF for upload tests. */
+export function makePdf(lines) {
+  const esc = (s) => s.replace(/[()\\]/g, '\\$&');
+  const content = `BT /F1 10 Tf 40 750 Td 12 TL ${lines.map((l) => `(${esc(l)}) Tj T*`).join(' ')} ET`;
+  const objs = ['<</Type/Catalog/Pages 2 0 R>>', '<</Type/Pages/Kids[3 0 R]/Count 1>>', '<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',
+    `<</Length ${content.length}>>\nstream\n${content}\nendstream`, '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>'];
+  let pdf = '%PDF-1.4\n'; const offs = [];
+  objs.forEach((o, i) => { offs.push(pdf.length); pdf += `${i + 1} 0 obj${o}endobj\n`; });
+  const x = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer<</Size ${objs.length + 1}/Root 1 0 R>>\nstartxref\n${x}\n%%EOF`;
+  return Buffer.from(pdf, 'latin1');
+}

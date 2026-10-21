@@ -42,6 +42,7 @@ export async function stats() {
     quizzes: { total: quizzes, published, drafts: quizzes - published },
     games: { completed: games, participants: participants[0]?.n ?? 0, live: liveRooms },
     activity: [...buckets].map(([date, v]) => ({ date, ...v })),
+    billing: await billingStats(),
   };
 }
 
@@ -212,12 +213,13 @@ async function roomByCode(code) {
 
 export async function roomDetail(code) {
   const r = await roomByCode(code);
-  const [players, host] = await Promise.all([Player.find({ roomId: r._id }).sort({ joinedAt: 1 }).select('nickname connected score joinedAt').lean(), User.findById(r.hostId).select('fullName email').lean()]);
+  const [players, host] = await Promise.all([Player.find({ roomId: r._id }).sort({ joinedAt: 1 }).select('nickname sticker muted connected score joinedAt').lean(), User.findById(r.hostId).select('fullName email').lean()]);
   return {
     code: r.code, status: r.status, quizTitle: r.snapshot.title, createdAt: r.createdAt, expiresAt: r.expiresAt, expiredReason: r.expiredReason,
     questionIndex: r.currentQuestionIndex >= 0 ? r.currentQuestionIndex : null, totalQuestions: r.snapshot.questions.length,
     host: host ? { id: String(host._id), fullName: host.fullName, email: host.email } : null,
-    players: players.map((p) => ({ id: String(p._id), nickname: p.nickname, connected: p.connected, score: p.score, joinedAt: p.joinedAt })),
+    chat: { mode: r.chatMode, enabled: r.features?.chat !== false },
+    players: players.map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', muted: !!p.muted, connected: p.connected, score: p.score, joinedAt: p.joinedAt })),
   };
 }
 
@@ -272,4 +274,171 @@ export async function listAudit({ page, limit, search, action }) {
     items: items.map((a) => ({ id: String(a._id), at: a.createdAt, adminEmail: a.adminEmail, action: a.action, targetType: a.targetType, targetId: a.targetId, targetLabel: a.targetLabel, details: a.details || null, ip: a.ip })),
     total, page, pages: pages(total, limit),
   };
+}
+
+/* ================================================================== settings, stickers, billing, chat moderation */
+import { Sticker, Plan, Subscription, Payment, ChatMessage } from '../models/index.js';
+import { getSettings, updateSettings } from './settings.js';
+import { entitlementsFor } from './entitlements.js';
+import { messageView, setMuted as chatSetMuted, deleteMessage as chatDeleteMessage } from './chatService.js';
+import { planView } from './billingService.js';
+import * as ps from './paystack.js';
+import { env } from '../config/env.js';
+
+export async function saveSettings(admin, patch, ip) {
+  const before = await getSettings();
+  const after = await updateSettings(patch);
+  const changes = [];
+  for (const [group, vals] of Object.entries(patch)) for (const [k, v] of Object.entries(vals)) if (JSON.stringify(before[group][k]) !== JSON.stringify(v)) changes.push({ setting: `${group}.${k}`, value: k === 'blockedWords' ? `${v.length} words` : v }); // list, not dotted keys (invalid in MongoDB documents)
+  if (changes.length) await audit(admin, 'settings.update', { type: 'system', label: 'Platform settings' }, { changes }, ip);
+  return after;
+}
+
+/* ---- stickers ---- */
+const stickerRow = (s) => ({ id: String(s._id), emoji: s.emoji, label: s.label, pack: s.pack, active: s.active, order: s.order });
+export async function listStickers() { return (await Sticker.find({}).sort({ order: 1, createdAt: 1 }).lean()).map(stickerRow); }
+export async function addSticker(admin, { emoji, label, pack }, ip) {
+  const last = await Sticker.findOne({}).sort({ order: -1 }).select('order').lean();
+  try { var s = await Sticker.create({ emoji, label, pack, order: (last?.order ?? -1) + 1 }); } catch (e) { if (e.code === 11000) throw new AppError(409, 'STICKER_EXISTS', 'That sticker already exists'); throw e; }
+  await audit(admin, 'sticker.add', { type: 'system', id: s._id, label: `${emoji} ${label || ''}`.trim() }, { pack }, ip);
+  return stickerRow(s);
+}
+export async function editSticker(admin, id, patch, ip) {
+  const s = await Sticker.findByIdAndUpdate(id, { $set: patch }, { new: true });
+  if (!s) throw notFound('Sticker');
+  await audit(admin, 'sticker.update', { type: 'system', id, label: s.emoji }, patch, ip);
+  return stickerRow(s);
+}
+export async function removeSticker(admin, id, ip) {
+  const s = await Sticker.findByIdAndDelete(id);
+  if (!s) throw notFound('Sticker');
+  await audit(admin, 'sticker.delete', { type: 'system', id, label: s.emoji }, undefined, ip);
+}
+
+/* ---- plans ---- */
+export async function listPlans() {
+  const plans = await Plan.find({}).sort({ sortOrder: 1, priceMinor: 1 }).lean();
+  return Promise.all(plans.map(async (p) => ({ ...planView(p), subscribers: await Subscription.countDocuments({ planId: p._id, status: { $in: ['active', 'non_renewing', 'past_due'] } }) })));
+}
+
+async function syncPaystack(plan) {
+  if (!plan.paystackPlanCode || !ps.paystackConfigured()) return 'skipped';
+  try { await ps.updatePlan(plan.paystackPlanCode, { name: plan.name, amountMinor: plan.priceMinor, interval: plan.interval }); return 'synced'; }
+  catch (e) { return `failed: ${e.message}`; }
+}
+
+export async function createPlan(admin, data, ip) {
+  if (data.isDefault && data.priceMinor > 0) throw new AppError(400, 'DEFAULT_MUST_BE_FREE', 'The default plan must be free');
+  try {
+    if (data.isDefault) await Plan.updateMany({}, { $set: { isDefault: false } });
+    var plan = await Plan.create(data);
+  } catch (e) { if (e.code === 11000) throw new AppError(409, 'SLUG_TAKEN', 'A plan with that identifier already exists'); throw e; }
+  await audit(admin, 'plan.create', { type: 'system', id: plan._id, label: plan.name }, { priceMinor: plan.priceMinor, currency: plan.currency }, ip);
+  return planView(plan);
+}
+
+export async function updatePlan(admin, id, patch, ip) {
+  const plan = await Plan.findById(id);
+  if (!plan) throw notFound('Plan');
+  if (plan.isDefault && patch.active === false) throw new AppError(409, 'DEFAULT_PLAN', 'The default plan can’t be deactivated. Make another plan the default first.');
+  if (patch.isDefault === false && plan.isDefault) throw new AppError(409, 'DEFAULT_PLAN', 'Pick another plan as the default instead.');
+  const price = patch.priceMinor ?? plan.priceMinor;
+  if ((patch.isDefault || plan.isDefault) && price > 0) throw new AppError(400, 'DEFAULT_MUST_BE_FREE', 'The default plan must be free');
+  const priceChanged = patch.priceMinor !== undefined && patch.priceMinor !== plan.priceMinor;
+  const intervalChanged = patch.interval !== undefined && patch.interval !== plan.interval;
+  if (patch.isDefault) await Plan.updateMany({ _id: { $ne: id } }, { $set: { isDefault: false } });
+  const { limits, features, ...rest } = patch;
+  Object.assign(plan, rest);
+  if (limits) plan.limits = { ...plan.limits.toObject(), ...limits };
+  if (features) plan.features = { ...plan.features.toObject(), ...features };
+  try { await plan.save(); } catch (e) { if (e.code === 11000) throw new AppError(409, 'SLUG_TAKEN', 'A plan with that identifier already exists'); throw e; }
+  const paystackSync = priceChanged || intervalChanged || patch.name ? await syncPaystack(plan) : 'unchanged';
+  await audit(admin, 'plan.update', { type: 'system', id, label: plan.name }, { ...patch, paystackSync }, ip);
+  return { plan: planView(plan), paystackSync };
+}
+
+export async function deletePlan(admin, id, ip) {
+  const plan = await Plan.findById(id);
+  if (!plan) throw notFound('Plan');
+  if (plan.isDefault) throw new AppError(409, 'DEFAULT_PLAN', 'The default plan can’t be deleted');
+  if (await Subscription.countDocuments({ planId: id })) throw new AppError(409, 'HAS_SUBSCRIBERS', 'This plan has subscribers. Deactivate it instead so they keep access.');
+  await Plan.deleteOne({ _id: id });
+  await audit(admin, 'plan.delete', { type: 'system', id, label: plan.name }, undefined, ip);
+}
+
+/* ---- payments & subscribers ---- */
+export async function listPayments({ page, limit, status }) {
+  const filter = status ? { status } : {};
+  const [items, total] = await Promise.all([Payment.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), Payment.countDocuments(filter)]);
+  const users = await User.find({ _id: { $in: items.map((p) => p.userId) } }).select('email fullName').lean();
+  const map = new Map(users.map((u) => [String(u._id), u]));
+  return { items: items.map((p) => ({ id: String(p._id), reference: p.reference, plan: p.planName, kind: p.kind, amountMinor: p.amountMinor, currency: p.currency, status: p.status, paidAt: p.paidAt, createdAt: p.createdAt, user: map.get(String(p.userId)) ? { id: String(p.userId), email: map.get(String(p.userId)).email, fullName: map.get(String(p.userId)).fullName } : null })), total, page, pages: pages(total, limit) };
+}
+
+export async function listSubscribers({ page, limit }) {
+  const filter = { status: { $in: ['active', 'non_renewing', 'past_due'] } };
+  const [items, total] = await Promise.all([Subscription.find(filter).sort({ updatedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), Subscription.countDocuments(filter)]);
+  const [users, plans] = await Promise.all([User.find({ _id: { $in: items.map((s) => s.userId) } }).select('email fullName').lean(), Plan.find({ _id: { $in: items.map((s) => s.planId) } }).select('name').lean()]);
+  const um = new Map(users.map((u) => [String(u._id), u])); const pm = new Map(plans.map((p) => [String(p._id), p]));
+  return { items: items.map((s) => ({ id: String(s._id), status: s.status, source: s.source, currentPeriodEnd: s.currentPeriodEnd, plan: pm.get(String(s.planId))?.name, user: um.get(String(s.userId)) ? { id: String(s.userId), email: um.get(String(s.userId)).email, fullName: um.get(String(s.userId)).fullName } : null })), total, page, pages: pages(total, limit) };
+}
+
+export async function billingStats() {
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+  const [paid, subscribers] = await Promise.all([Payment.find({ status: 'success' }).select('amountMinor currency paidAt').lean(), Subscription.countDocuments({ status: { $in: ['active', 'non_renewing', 'past_due'] }, source: 'paystack' })]);
+  const total = {}; const last30 = {};
+  for (const p of paid) { total[p.currency] = (total[p.currency] || 0) + p.amountMinor; if (p.paidAt >= since) last30[p.currency] = (last30[p.currency] || 0) + p.amountMinor; }
+  return { revenueMinor: total, revenueLast30DaysMinor: last30, paidSubscribers: subscribers };
+}
+
+/* ---- per-user plan control ---- */
+export async function userBilling(userId) {
+  const [ent, sub] = await Promise.all([entitlementsFor(userId), Subscription.findOne({ userId }).lean()]);
+  const u = await User.findById(userId).select('planOverrides').lean();
+  return { entitlements: ent, subscription: sub ? { status: sub.status, source: sub.source, currentPeriodEnd: sub.currentPeriodEnd, planId: String(sub.planId) } : null, overrides: u?.planOverrides || {} };
+}
+
+export async function grantPlan(admin, userId, planId, endsAt, ip) {
+  const [t, plan] = await Promise.all([getUser(userId), Plan.findById(planId)]);
+  if (!plan) throw notFound('Plan');
+  const existing = await Subscription.findOne({ userId }).lean();
+  if (existing?.source === 'paystack' && ['active', 'past_due'].includes(existing.status) && (!existing.currentPeriodEnd || existing.currentPeriodEnd > new Date())) {
+    throw new AppError(409, 'HAS_PAID_SUBSCRIPTION', 'This user has an active paid subscription. Ask them to cancel it first, or use limit overrides instead.');
+  }
+  await Subscription.updateOne({ userId }, { $set: { planId, status: 'active', source: 'admin', currentPeriodEnd: endsAt || null }, $unset: { paystackSubscriptionCode: 1, emailToken: 1 } }, { upsert: true });
+  await audit(admin, 'user.grant_plan', { type: 'user', id: userId, label: t.email }, { plan: plan.name, endsAt: endsAt ? endsAt.toISOString() : 'never' }, ip);
+}
+
+export async function revokePlan(admin, userId, ip) {
+  const t = await getUser(userId);
+  const sub = await Subscription.findOne({ userId });
+  if (!sub) throw new AppError(404, 'NO_SUBSCRIPTION', 'This user has no plan to revoke');
+  await Subscription.updateOne({ _id: sub._id }, { $set: { status: 'canceled', currentPeriodEnd: new Date() } });
+  await audit(admin, 'user.revoke_plan', { type: 'user', id: userId, label: t.email }, { was: sub.source }, ip);
+}
+
+export async function setOverrides(admin, userId, overrides, ip) {
+  const t = await getUser(userId);
+  const clean = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== null && v !== undefined));
+  await User.updateOne({ _id: userId }, Object.keys(clean).length ? { $set: { planOverrides: clean } } : { $unset: { planOverrides: 1 } });
+  await audit(admin, 'user.set_limits', { type: 'user', id: userId, label: t.email }, clean, ip);
+}
+
+/* ---- chat moderation ---- */
+export async function roomChat(code) {
+  const r = await roomByCode(code);
+  const rows = await ChatMessage.find({ roomId: r._id }).sort({ createdAt: -1 }).limit(100).lean();
+  return rows.reverse().map((m) => ({ ...messageView(m), deleted: m.deleted, deletedBy: m.deletedBy || null }));
+}
+export async function deleteChat(admin, code, messageId, ip) {
+  const r = await roomByCode(code);
+  const m = await ChatMessage.findOne({ _id: messageId, roomId: r._id }).lean();
+  if (!m) throw notFound('Message');
+  await chatDeleteMessage(r._id, messageId, `admin:${admin.email}`);
+  await audit(admin, 'chat.delete', { type: 'room', id: r._id, label: `${r.code} · ${m.nickname}` }, { text: m.text }, ip);
+}
+export async function mutePlayer(admin, code, playerId, muted, ip) {
+  const r = await roomByCode(code);
+  const p = await chatSetMuted(r._id, playerId, muted);
+  await audit(admin, muted ? 'player.mute' : 'player.unmute', { type: 'player', id: playerId, label: `${p.nickname} in ${r.code}` }, undefined, ip);
 }

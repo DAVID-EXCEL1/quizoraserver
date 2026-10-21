@@ -5,6 +5,8 @@ import { AppError, notFound } from '../utils/errors.js';
 import { generatePin } from '../utils/tokens.js';
 import { publishProblems } from '../validators/quiz.js';
 import { emailConfigured } from './mailer.js';
+import { entitlementsFor } from './entitlements.js';
+import { getSettings } from './settings.js';
 
 export const joinUrl = (code) => `${env.clientUrl}/join/${code}`;
 export const hostUrl = (code) => `${env.clientUrl}/host/${code}`;
@@ -28,11 +30,15 @@ export async function createRoom(user, quizId) {
       correctKey: q.correctKey, timeLimit: q.timeLimit, basePoints: q.basePoints, imageUrl: q.imageUrl || null,
     })),
   };
+  const ent = await entitlementsFor(user._id);
+  const settings = await getSettings();
+  const chatOn = ent.features.chat;
   const now = Date.now();
   for (let attempt = 0; attempt < 12; attempt++) {
     try {
       return await Room.create({
         code: generatePin(), hostId: user._id, quizId: quiz._id, snapshot, status: 'LOBBY',
+        maxPlayers: ent.limits.maxPlayersPerGame, features: { chat: chatOn, stickers: ent.features.stickers }, chatMode: chatOn ? settings.chat.defaultMode : 'off',
         lastActivityAt: new Date(now), expiresAt: new Date(now + env.roomInactivityMs),
       });
     } catch (err) {

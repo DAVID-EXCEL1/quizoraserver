@@ -25,4 +25,5 @@ export const tokenSchema = z.object({ token: z.string().min(20).max(200) }).stri
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(200), password, confirmPassword: z.string(),
 }).strict().refine((v) => v.password === v.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
-export const profileSchema = z.object({ fullName }).strict();
+export const profileSchema = z.object({ fullName: fullName.optional(), sticker: z.string().trim().max(16).optional() }).strict()
+  .refine((v) => v.fullName !== undefined || v.sticker !== undefined, 'Nothing to change');

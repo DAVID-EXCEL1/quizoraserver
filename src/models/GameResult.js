@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const rankingSchema = new mongoose.Schema({
   rank: Number,
   nickname: String,
+  sticker: String,
   score: Number,
   correctCount: Number,
   answeredCount: Number,

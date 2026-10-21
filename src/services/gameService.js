@@ -6,7 +6,7 @@ import { log } from '../utils/logger.js';
 import { toGame, toHostCtl, toPlayer } from '../sockets/broadcast.js';
 import { computePoints, rankPlayers } from './scoring.js';
 import { getOwnedRoom } from './roomService.js';
-import { publicQuestion, hostView, leaderboard, lbRow } from './views.js';
+import { publicQuestion, hostView, leaderboard, lbRow, boardRows } from './views.js';
 
 const LIVE = ['LOBBY', 'QUESTION_ACTIVE', 'QUESTION_RESULT', 'LEADERBOARD'];
 const bump = (now = new Date()) => ({ lastActivityAt: now, expiresAt: new Date(now.getTime() + env.roomInactivityMs) });
@@ -99,7 +99,7 @@ export async function showLeaderboard(code, hostId) {
   const updated = await transition({ roomId: room._id, hostId, from: 'QUESTION_RESULT', index: room.currentQuestionIndex, set: { status: 'LEADERBOARD' } });
   if (!updated) return explainFailure(room._id, hostId);
   const ranked = await leaderboard(updated._id);
-  toGame(updated._id, 'leaderboard:updated', { leaderboard: ranked.slice(0, 10).map(lbRow), questionIndex: updated.currentQuestionIndex });
+  toGame(updated._id, 'leaderboard:updated', { leaderboard: await boardRows(updated, ranked, 10), questionIndex: updated.currentQuestionIndex });
   for (const p of ranked) toPlayer(p._id, 'player:rank', { rank: p.rank, score: p.score, streak: p.streak });
   await pushHostState(updated);
   return updated;
@@ -185,7 +185,7 @@ async function completeGame(roomId, hostId) {
   await ensureGameResult(updated);
   await Player.updateMany({ roomId, tokenHash: { $exists: true } }, { $set: { tokenExpiresAt: new Date(now.getTime() + env.finishedPlayerTokenMs) } });
   const ranked = await leaderboard(roomId);
-  toGame(roomId, 'game:finished', { code: updated.code, podium: ranked.slice(0, 3).map(lbRow), leaderboard: ranked.slice(0, 10).map(lbRow) });
+  toGame(roomId, 'game:finished', { code: updated.code, podium: ranked.slice(0, 3).map(lbRow), leaderboard: await boardRows(updated, ranked, 10) });
   await pushHostState(updated);
   return updated;
 }
@@ -207,7 +207,7 @@ export async function ensureGameResult(room) {
       roomId: room._id, roomCode: room.code, hostId: room.hostId, quizId: room.quizId, quizTitle: room.snapshot.title,
       totalQuestions: qs.length, completedAt: room.completedAt || new Date(), participantCount: ranked.length,
       rankings: ranked.map((p) => ({
-        rank: p.rank, nickname: p.nickname, score: p.score, correctCount: p.correctCount, answeredCount: p.answeredCount, bestStreak: p.bestStreak,
+        rank: p.rank, nickname: p.nickname, sticker: p.sticker || '', score: p.score, correctCount: p.correctCount, answeredCount: p.answeredCount, bestStreak: p.bestStreak,
         avgResponseMs: p.answeredCount ? Math.round(p.totalResponseMs / p.answeredCount) : null,
       })),
       questionStats,

@@ -13,6 +13,11 @@ import { hostView, playerView } from '../services/views.js';
 import * as game from '../services/gameService.js';
 import { User } from '../models/index.js';
 import { answerSchema, hostActionSchema } from '../validators/game.js';
+import * as chat from '../services/chatService.js';
+import { z } from 'zod';
+import { objectId } from '../validators/common.js';
+
+const chatText = z.object({ text: z.string().max(1000) }).strict();
 import { pin } from '../validators/common.js';
 
 function parseCookies(header = '') {
@@ -120,8 +125,27 @@ function wireHost(io, socket) {
     socket.join(`game:${room._id}`);
     socket.join(`hostctl:${room._id}`);
     socket.data.roomCode = room.code;
+    socket.emit('chat:history', await chat.history(room._id));
     return hostView(room);
   }));
+
+  // ---- chat (host): speak, delete messages, mute players, change mode ----
+  const ownedRoom = async () => { if (!socket.data.roomCode) throw new AppError(409, 'NOT_JOINED', 'Join a room first'); return getOwnedRoom(socket.data.roomCode, userId); };
+  socket.on('chat:send', handle(async (payload) => {
+    if (!socketAllow(socket, 'chat', 8, 10_000)) throw new AppError(429, 'RATE_LIMITED', 'Slow down');
+    await stillAuthorized();
+    const { text } = chatText.parse(payload);
+    const user = await User.findById(userId).select('fullName sticker').lean();
+    return chat.postFromHost(await ownedRoom(), user, text);
+  }));
+  socket.on('chat:delete', handle(async (payload) => { await stillAuthorized(); const room = await ownedRoom(); await chat.deleteMessage(room._id, objectId.parse(payload?.id), 'host'); return { deleted: true }; }));
+  socket.on('chat:mute', handle(async (payload) => {
+    await stillAuthorized(); const room = await ownedRoom();
+    await chat.setMuted(room._id, objectId.parse(payload?.playerId), !!payload?.muted);
+    await broadcastRoster(room._id);
+    return { muted: !!payload?.muted };
+  }));
+  socket.on('chat:mode', handle(async (payload) => { await stillAuthorized(); const room = await ownedRoom(); await chat.setMode(room._id, payload?.mode); await game.pushHostState(room._id); return { mode: payload.mode }; }));
 
   socket.on('host:command', handle(async (payload) => {
     if (!socketAllow(socket, 'cmd', 20, 10_000)) throw new AppError(429, 'RATE_LIMITED', 'Slow down');
@@ -149,7 +173,10 @@ function wirePlayer(io, socket) {
     await broadcastRoster(roomId);
     toHostCtl(roomId, 'player:reconnected', { id: playerId });
     const { player, room } = await authenticatePlayerToken(socket.handshake.auth.token, socket.data.roomCode).catch(() => ({}));
-    if (player) socket.emit('state:restore', await playerView(room, player)); // authoritative state after any (re)connect
+    if (player) {
+      socket.emit('state:restore', await playerView(room, player)); // authoritative state after any (re)connect
+      socket.emit('chat:history', await chat.history(room._id));
+    }
   })().catch((e) => log.error('player connect', e.message));
 
   socket.on('answer:submit', handle(async (payload) => {
@@ -166,6 +193,13 @@ function wirePlayer(io, socket) {
       if (m) socket.emit('answer:rejected', { code: m.body.code, message: m.body.message });
       throw err;
     }
+  }));
+
+  socket.on('chat:send', handle(async (payload) => {
+    if (!socketAllow(socket, 'chat', 6, 10_000)) throw new AppError(429, 'RATE_LIMITED', 'Slow down');
+    const { text } = chatText.parse(payload);
+    const { player } = await authenticatePlayerToken(socket.handshake.auth.token, socket.data.roomCode);
+    return chat.postFromPlayer(player, text);
   }));
 
   socket.on('state:request', handle(async () => {

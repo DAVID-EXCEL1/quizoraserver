@@ -5,9 +5,13 @@ import { connectDb } from './config/db.js';
 import { createApp } from './app.js';
 import { initSockets } from './sockets/index.js';
 import { startJobs } from './jobs/maintenance.js';
+import { seedPlans } from './services/billingService.js';
+import { seedStickers } from './services/stickers.js';
 import { log } from './utils/logger.js';
 
 await connectDb();
+await seedPlans();
+await seedStickers();
 const server = http.createServer(createApp());
 initSockets(server);
 const stopJobs = env.enableWorker ? startJobs() : () => {};

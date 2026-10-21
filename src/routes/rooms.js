@@ -4,13 +4,13 @@ import { requirePlayer } from '../middleware/playerAuth.js';
 import { csrfProtect } from '../middleware/security.js';
 import { validate } from '../middleware/validate.js';
 import { pinLookupLimiter, joinLimiter } from '../middleware/rateLimit.js';
-import { createRoomSchema, joinSchema, hostActionSchema } from '../validators/game.js';
+import { createRoomSchema, joinSchema, hostActionSchema, playerProfileSchema } from '../validators/game.js';
 import { pin } from '../validators/common.js';
 import * as rooms from '../services/roomService.js';
 import * as players from '../services/playerService.js';
 import * as game from '../services/gameService.js';
 import { hostView, playerView } from '../services/views.js';
-import { toHostCtl } from '../sockets/broadcast.js';
+import { toHostCtl, toPlayer } from '../sockets/broadcast.js';
 import { asyncHandler, ok } from '../utils/misc.js';
 import { AppError } from '../utils/errors.js';
 
@@ -49,7 +49,7 @@ r.get('/:code/public', pinLookupLimiter, asyncHandler(async (req, res) => ok(res
 
 r.post('/:code/join', joinLimiter, validate(joinSchema), asyncHandler(async (req, res) => {
   const existing = (req.get('x-player-token') || '').slice(0, 200) || undefined;
-  const { player, room, token, reconnected } = await players.joinRoom(req.params.code, req.valid.body.nickname, existing);
+  const { player, room, token, reconnected } = await players.joinRoom(req.params.code, req.valid.body.nickname, existing, req.valid.body.sticker);
   if (!reconnected) {
     await players.broadcastRoster(room._id);
     toHostCtl(room._id, 'player:joined', { id: String(player._id), nickname: player.nickname });
@@ -59,5 +59,14 @@ r.post('/:code/join', joinLimiter, validate(joinSchema), asyncHandler(async (req
 }));
 
 r.get('/:code/state', requirePlayer, asyncHandler(async (req, res) => ok(res, await playerView(req.room, req.player))));
+
+r.patch('/:code/me', requirePlayer, validate(playerProfileSchema), asyncHandler(async (req, res) => {
+  const updated = await players.updateProfile(req.player, req.room, req.valid.body);
+  await players.broadcastRoster(req.room._id);
+  toHostCtl(req.room._id, 'player:updated', { id: String(updated._id), nickname: updated.nickname, sticker: updated.sticker });
+  await game.pushHostState(req.room._id);
+  toPlayer(updated._id, 'player:updated', { nickname: updated.nickname, sticker: updated.sticker });
+  ok(res, { player: { id: String(updated._id), nickname: updated.nickname, sticker: updated.sticker } });
+}));
 
 export default r;

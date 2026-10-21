@@ -6,6 +6,10 @@ const playerSchema = new mongoose.Schema({
   nicknameKey: { type: String, required: true },
   tokenHash: { type: String, index: true }, // SHA-256 of the anonymous session token; unset on cleanup
   tokenExpiresAt: Date,
+  sticker: { type: String, default: '' },
+  muted: { type: Boolean, default: false },
+  nickChanges: { type: Number, default: 0 },
+  lastChatAt: { type: Date, default: null },
   joinedAt: { type: Date, default: Date.now },
   lastSeenAt: { type: Date, default: Date.now },
   connected: { type: Boolean, default: false },

@@ -5,6 +5,8 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, lowercase: true, trim: true, unique: true, maxlength: 254 },
   passwordHash: { type: String, required: true, select: false },
   emailVerified: { type: Boolean, default: false },
+  sticker: { type: String, default: '' },
+  planOverrides: { type: mongoose.Schema.Types.Mixed, default: undefined }, // admin-set per-user limit overrides
   role: { type: String, enum: ['host', 'admin'], default: 'host' },
   status: { type: String, enum: ['active', 'suspended'], default: 'active' },
   suspendedReason: { type: String, maxlength: 300 },
