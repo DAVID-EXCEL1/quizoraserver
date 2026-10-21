@@ -61,7 +61,7 @@ export const env = {
     port: num(e.SMTP_PORT, 587),
     user: e.SMTP_USER || '',
     pass: e.SMTP_PASS || '',
-    from: e.EMAIL_FROM || 'Quizora <no-reply@localhost>',
+    from: e.EMAIL_FROM || 'Dextquiz <no-reply@localhost>',
   },
   devLogEmailLinks: bool(e.DEV_LOG_EMAIL_LINKS, false) && !isProd,
 
