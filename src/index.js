@@ -16,7 +16,7 @@ const server = http.createServer(createApp());
 initSockets(server);
 const stopJobs = env.enableWorker ? startJobs() : () => {};
 
-server.listen(env.port, () => log.info(`Quizora API on :${env.port} (${env.nodeEnv}); worker ${env.enableWorker ? 'in-process' : 'disabled'}`));
+server.listen(env.port, () => log.info(`DextQuiz API on :${env.port} (${env.nodeEnv}); worker ${env.enableWorker ? 'in-process' : 'disabled'}`));
 
 async function shutdown() {
   stopJobs();

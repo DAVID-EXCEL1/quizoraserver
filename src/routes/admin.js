@@ -67,7 +67,7 @@ const settingsBody = z.object({
   billing: z.object({ currency: z.enum(['NGN', 'GHS', 'ZAR', 'KES', 'USD']) }).partial().strict().optional(),
   ai: z.object({ maxQuestions: z.number().int().min(1).max(50), imagesEnabled: z.boolean() }).partial().strict().optional(),
 }).strict();
-r.get('/settings', asyncHandler(async (req, res) => ok(res, { settings: await getSettings(), integrations: { paystack: !!env.paystack.secretKey, groq: !!env.groq.apiKey, pexels: !!env.pexelsKey, smtp: !!env.smtp.host, cloudinary: !!env.cloudinary.cloudName } })));
+r.get('/settings', asyncHandler(async (req, res) => ok(res, { settings: await getSettings(), integrations: { paystack: !!env.paystack.secretKey, groq: !!env.groq.apiKey, pexels: !!env.pexelsKey, resend: !!(env.resend.apiKey && env.resend.from), cloudinary: !!env.cloudinary.cloudName } })));
 r.put('/settings', validate(settingsBody), asyncHandler(async (req, res) => ok(res, { settings: await svc.saveSettings(req.user, Object.fromEntries(Object.entries(req.valid.body).filter(([, v]) => v)), ip(req)) })));
 
 /* ---- stickers ---- */

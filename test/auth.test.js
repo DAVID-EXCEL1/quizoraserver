@@ -15,7 +15,7 @@ describe('1. host registration', () => {
     const res = await register(body);
     expect(res.status).toBe(201);
     expect(res.body.data.user.email).toBe(body.email);
-    expect(res.body.data.emailDelivery).toBe('not_configured'); // honest: no SMTP in tests
+    expect(res.body.data.emailDelivery).toBe('not_configured'); // honest: no Resend credentials in tests
     const cookies = res.headers['set-cookie'].join(';');
     expect(cookies).toMatch(/qz_at=.*HttpOnly/);
     expect(cookies).toMatch(/qz_rt=.*HttpOnly/);

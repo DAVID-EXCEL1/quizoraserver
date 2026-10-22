@@ -26,7 +26,7 @@ export async function seedPlans() {
   const { billing } = await getSettings();
   const base = { currency: billing.currency };
   await Plan.insertMany([
-    { ...base, name: 'Free', slug: 'free', description: 'Try Quizora with small groups.', priceMinor: 0, isDefault: true, sortOrder: 0, limits: { maxPlayersPerGame: 10, maxQuizzes: 5, maxQuestionsPerQuiz: 10, aiGenerationsPerMonth: 3 }, features: { chat: true, stickers: true, ai: true } },
+    { ...base, name: 'Free', slug: 'free', description: 'Try DextQuiz with small groups.', priceMinor: 0, isDefault: true, sortOrder: 0, limits: { maxPlayersPerGame: 10, maxQuizzes: 5, maxQuestionsPerQuiz: 10, aiGenerationsPerMonth: 3 }, features: { chat: true, stickers: true, ai: true } },
     { ...base, name: 'Pro', slug: 'pro', description: 'For teachers, trainers and communities.', priceMinor: 500000, sortOrder: 1, limits: { maxPlayersPerGame: 100, maxQuizzes: 100, maxQuestionsPerQuiz: 50, aiGenerationsPerMonth: 50 }, features: { chat: true, stickers: true, ai: true } },
     { ...base, name: 'Business', slug: 'business', description: 'Large events and organisations.', priceMinor: 1500000, sortOrder: 2, limits: { maxPlayersPerGame: 500, maxQuizzes: -1, maxQuestionsPerQuiz: 100, aiGenerationsPerMonth: 300 }, features: { chat: true, stickers: true, ai: true } },
   ]);

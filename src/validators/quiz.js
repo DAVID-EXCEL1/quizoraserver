@@ -6,7 +6,7 @@ const KEYS = ['A', 'B', 'C', 'D'];
 // hot-linking arbitrary third-party URLs that could track players.
 const imageUrl = z.string().url().max(500)
   .refine((u) => { try { const x = new URL(u); return x.protocol === 'https:' && ['res.cloudinary.com', 'images.pexels.com'].includes(x.hostname); } catch { return false; } },
-    'Image must be uploaded through Quizora or come from the built-in photo search')
+    'Image must be uploaded through DextQuiz or come from the built-in photo search')
   .nullish()
   .transform((v) => v || null);
 

@@ -56,12 +56,9 @@ export const env = {
   sweepIntervalMs: num(e.SWEEP_INTERVAL_MS, 1000),
   cleanupIntervalMs: num(e.CLEANUP_INTERVAL_MS, 60 * 1000),
 
-  smtp: {
-    host: e.SMTP_HOST || '',
-    port: num(e.SMTP_PORT, 587),
-    user: e.SMTP_USER || '',
-    pass: e.SMTP_PASS || '',
-    from: e.EMAIL_FROM || 'Quizora <no-reply@localhost>',
+  resend: {
+    apiKey: e.RESEND_API_KEY || '',
+    from: e.RESEND_FROM_EMAIL || '',
   },
   devLogEmailLinks: bool(e.DEV_LOG_EMAIL_LINKS, false) && !isProd,
 

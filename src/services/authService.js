@@ -95,7 +95,7 @@ export async function sendVerificationEmail(user) {
     const raw = await createAuthToken(user, 'verify_email', VERIFY_TTL);
     const link = `${env.clientUrl}/verify-email?token=${raw}`;
     await sendMail({
-      to: user.email, subject: 'Verify your Quizora email',
+      to: user.email, subject: 'Verify your DextQuiz email',
       text: `Hi ${user.fullName},\n\nConfirm your email to start hosting games:\n${link}\n\nThis link expires in 24 hours.`,
       html: `<p>Hi ${escapeHtml(user.fullName)},</p><p><a href="${link}">Confirm your email</a> to start hosting games. This link expires in 24 hours.</p>`,
     });
@@ -153,7 +153,7 @@ export async function requestPasswordReset(email) {
     const raw = await createAuthToken(user, 'reset_password', RESET_TTL);
     const link = `${env.clientUrl}/reset-password?token=${raw}`;
     await sendMail({
-      to: user.email, subject: 'Reset your Quizora password',
+      to: user.email, subject: 'Reset your DextQuiz password',
       text: `Use this link to choose a new password (valid for 1 hour, single use):\n${link}\n\nIf you didn't ask for this, ignore this email.`,
       html: `<p><a href="${link}">Choose a new password</a> (valid for 1 hour, single use). If you didn't ask for this, ignore this email.</p>`,
     });
