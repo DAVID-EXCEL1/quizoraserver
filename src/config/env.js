@@ -73,7 +73,7 @@ export const env = {
   redisUrl: e.REDIS_URL || '',
   maxPlayersCeiling: num(e.MAX_PLAYERS_CEILING, 1000),
   paystack: { secretKey: e.PAYSTACK_SECRET_KEY || '', publicKey: e.PAYSTACK_PUBLIC_KEY || '', baseUrl: (e.PAYSTACK_BASE_URL || 'https://api.paystack.co').replace(/\/+$/, '') },
-  groq: { apiKey: e.GROQ_API_KEY || '', model: e.GROQ_MODEL || 'llama-3.3-70b-versatile', baseUrl: (e.GROQ_BASE_URL || 'https://api.groq.com').replace(/\/+$/, '') },
+  groq: { apiKey: e.GROQ_API_KEY || '', model: e.GROQ_MODEL || 'openai/gpt-oss-120b', baseUrl: (e.GROQ_BASE_URL || 'https://api.groq.com').replace(/\/+$/, '') },
   pexelsKey: e.PEXELS_API_KEY || '',
   pexelsBaseUrl: (e.PEXELS_BASE_URL || 'https://api.pexels.com').replace(/\/+$/, ''),
 };
