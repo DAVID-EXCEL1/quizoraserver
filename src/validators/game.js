@@ -3,7 +3,7 @@ import { objectId } from './common.js';
 
 export const createRoomSchema = z.object({ quizId: objectId }).strict();
 
-const RESERVED = new Set(['host', 'admin', 'administrator', 'moderator', 'mod', 'quizora', 'dextquiz', 'system', 'staff', 'support', 'teacher', 'null', 'undefined']);
+const RESERVED = new Set(['host', 'admin', 'administrator', 'moderator', 'mod', 'quizora', 'system', 'staff', 'support', 'teacher', 'null', 'undefined']);
 export const nicknameSchema = z.string()
   .transform((s) => s.normalize('NFKC').replace(/\s+/g, ' ').trim())
   .pipe(z.string()

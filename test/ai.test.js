@@ -37,7 +37,7 @@ describe('AI question generation', () => {
     // the request sent to Groq: key stays server-side, JSON mode, source fenced as data, system prompt untouched by the document
     const call = mock.calls.filter((c) => c.url.includes('groq')).at(-1);
     expect(call.headers.Authorization).toBe('Bearer gsk_unit_test');
-    expect(call.body).toMatchObject({ model: 'openai/gpt-oss-120b', response_format: { type: 'json_object' } });
+    expect(call.body).toMatchObject({ model: 'llama-3.3-70b-versatile', response_format: { type: 'json_object' } });
     expect(call.body.messages[0].content).toMatch(/untrusted data/);
     expect(call.body.messages[0].content).not.toContain('Photosynthesis');
     expect(call.body.messages[1].content).toContain('Write 2 hard');
