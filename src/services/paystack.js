@@ -3,6 +3,7 @@ import { env } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
 
 export const paystackConfigured = () => !!env.paystack.secretKey;
+export const paystackMode = () => (env.paystack.secretKey.startsWith('sk_live_') ? 'live' : env.paystack.secretKey.startsWith('sk_test_') ? 'test' : 'unknown');
 
 async function call(method, path, body) {
   if (!paystackConfigured()) throw new AppError(503, 'PAYSTACK_NOT_CONFIGURED', 'Payments are not configured on this server');

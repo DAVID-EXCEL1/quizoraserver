@@ -106,6 +106,33 @@ describe('checkout and verification', () => {
     const q = await publishedQuiz(h, { n: 1 });
     expect((await models.Room.findOne({ code: (await launch(h, q.id)).room.code })).maxPlayers).toBe(100);
   });
+  it('recreates cached Paystack plans when switching from test to live credentials', async () => {
+    const h = await newHost(app);
+    const plan = await models.Plan.findOne({ slug: 'business' });
+    const originalCode = plan.paystackPlanCode;
+    const originalMode = plan.paystackMode;
+    let reference;
+    try {
+      await models.Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: 'PLN_TEST_CACHED', paystackMode: 'test' } });
+      env.paystack.secretKey = 'sk_live_unit_secret';
+
+      const c = await checkout(h, String(plan._id));
+      expect(c.status).toBe(200);
+      reference = c.body.data.reference;
+      const refreshed = await models.Plan.findById(plan._id).lean();
+      expect(refreshed.paystackMode).toBe('live');
+      expect(refreshed.paystackPlanCode).not.toBe('PLN_TEST_CACHED');
+      expect(mock.calls.filter((x) => x.url.includes('/transaction/initialize')).at(-1).body.plan).toBe(refreshed.paystackPlanCode);
+    } finally {
+      if (reference) await models.Payment.deleteOne({ reference });
+      const update = {};
+      if (originalCode === undefined) update.$unset = { ...(update.$unset || {}), paystackPlanCode: 1 };
+      else update.$set = { ...(update.$set || {}), paystackPlanCode: originalCode };
+      if (originalMode === undefined) update.$unset = { ...(update.$unset || {}), paystackMode: 1 };
+      else update.$set = { ...(update.$set || {}), paystackMode: originalMode };
+      await models.Plan.updateOne({ _id: plan._id }, update);
+    }
+  });
   it("refuses payments that don't match (amount/currency) and another user's reference", async () => {
     const h = await newHost(app); const other = await newHost(app);
     const c = (await checkout(h, String(pro._id))).body.data;
@@ -217,9 +244,14 @@ describe('admin billing controls', () => {
       const r = await admin.patch(A(`/plans/${pro._id}`), { priceMinor: 550000 });
       expect(r.status).toBe(200); expect(r.body.data.paystackSync).toMatch(/failed: Plan locked/);
       expect((await models.Plan.findById(pro._id)).priceMinor).toBe(550000);
+      expect((await models.Plan.findById(pro._id)).paystackPlanCode).toBeUndefined();
     } finally { m2.restore(); }
     // restore the shared mock stack that m2 wrapped
     await admin.patch(A(`/plans/${pro._id}`), { priceMinor: 500000 });
+    const h = await newHost(app);
+    const c = await checkout(h, String(pro._id));
+    expect(c.status).toBe(200);
+    expect((await models.Plan.findById(pro._id)).paystackMode).toBe('test');
   });
   it('grants and revokes plans, sets per-user limits, and keeps paid subscriptions safe', async () => {
     const u = await newHost(app);

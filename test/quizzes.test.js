@@ -59,6 +59,33 @@ describe('7. quiz CRUD', () => {
     expect(pub.body.data.items.every((x) => x.status === 'published')).toBe(true);
     expect(pub.body.data.items.length).toBeLessThanOrEqual(1);
   });
+  it('keeps existing quizzes after a downgrade, blocks new ones, and requires over-limit quizzes to be deleted before editing', async () => {
+    const host = await newHost(app);
+    const { Plan, Subscription } = await import('../src/models/index.js');
+    const pro = await Plan.findOne({ slug: 'pro' });
+    await Subscription.create({ userId: host.user.id, planId: pro._id, source: 'admin', status: 'active' });
+    const ids = [];
+    for (let i = 0; i < 6; i++) {
+      const created = await host.post('/api/quizzes', { title: `Pro quiz ${i + 1}`, questions: sampleQuestions(1) });
+      expect(created.status).toBe(201);
+      ids.push(created.body.data.id);
+    }
+
+    await Subscription.updateOne({ userId: host.user.id }, { $set: { status: 'canceled', currentPeriodEnd: new Date() } });
+    const list = await host.get('/api/quizzes');
+    expect(list.body.data.total).toBe(6);
+    expect(list.body.data.items.map((quiz) => quiz.id)).toEqual(expect.arrayContaining(ids));
+    expect((await host.post('/api/quizzes', { title: 'Another quiz', questions: sampleQuestions(1) })).body.error.code).toBe('PLAN_LIMIT');
+
+    const blockedEdit = await host.put(`/api/quizzes/${ids[0]}`, { title: 'Edited', description: '', questions: sampleQuestions(1) });
+    expect(blockedEdit.status).toBe(402);
+    expect(blockedEdit.body.error).toMatchObject({ code: 'PLAN_LIMIT', details: { limit: 'maxQuizzes', max: 5 } });
+    expect(blockedEdit.body.error.message).toContain('Delete 1 extra quiz');
+
+    expect((await host.delete(`/api/quizzes/${ids[0]}`)).status).toBe(200);
+    expect((await host.put(`/api/quizzes/${ids[1]}`, { title: 'Edited', description: '', questions: sampleQuestions(1) })).status).toBe(200);
+    expect((await host.get('/api/quizzes')).body.data.total).toBe(5);
+  });
 });
 
 describe('8. ownership enforcement', () => {

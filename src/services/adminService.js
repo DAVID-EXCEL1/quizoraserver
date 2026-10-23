@@ -321,10 +321,25 @@ export async function listPlans() {
   return Promise.all(plans.map(async (p) => ({ ...planView(p), subscribers: await Subscription.countDocuments({ planId: p._id, status: { $in: ['active', 'non_renewing', 'past_due'] } }) })));
 }
 
-async function syncPaystack(plan) {
-  if (!plan.paystackPlanCode || !ps.paystackConfigured()) return 'skipped';
-  try { await ps.updatePlan(plan.paystackPlanCode, { name: plan.name, amountMinor: plan.priceMinor, interval: plan.interval }); return 'synced'; }
-  catch (e) { return `failed: ${e.message}`; }
+async function syncPaystack(plan, { recreate = false, billingChanged = false } = {}) {
+  if (!plan.paystackPlanCode) return 'skipped';
+  const discardCachedPlan = async () => {
+    await Plan.updateOne({ _id: plan._id }, { $unset: { paystackPlanCode: 1, paystackMode: 1 } });
+    plan.paystackPlanCode = undefined;
+    plan.paystackMode = undefined;
+  };
+  if (recreate || (!ps.paystackConfigured() && billingChanged) || (ps.paystackConfigured() && plan.paystackMode !== ps.paystackMode())) {
+    await discardCachedPlan();
+    return 'recreated';
+  }
+  if (!ps.paystackConfigured()) return 'skipped';
+  try {
+    await ps.updatePlan(plan.paystackPlanCode, { name: plan.name, amountMinor: plan.priceMinor, interval: plan.interval });
+    return 'synced';
+  } catch (e) {
+    await discardCachedPlan();
+    return `failed: ${e.message}`;
+  }
 }
 
 export async function createPlan(admin, data, ip) {
@@ -345,6 +360,7 @@ export async function updatePlan(admin, id, patch, ip) {
   const price = patch.priceMinor ?? plan.priceMinor;
   if ((patch.isDefault || plan.isDefault) && price > 0) throw new AppError(400, 'DEFAULT_MUST_BE_FREE', 'The default plan must be free');
   const priceChanged = patch.priceMinor !== undefined && patch.priceMinor !== plan.priceMinor;
+  const currencyChanged = patch.currency !== undefined && patch.currency !== plan.currency;
   const intervalChanged = patch.interval !== undefined && patch.interval !== plan.interval;
   if (patch.isDefault) await Plan.updateMany({ _id: { $ne: id } }, { $set: { isDefault: false } });
   const { limits, features, ...rest } = patch;
@@ -352,7 +368,10 @@ export async function updatePlan(admin, id, patch, ip) {
   if (limits) plan.limits = { ...plan.limits.toObject(), ...limits };
   if (features) plan.features = { ...plan.features.toObject(), ...features };
   try { await plan.save(); } catch (e) { if (e.code === 11000) throw new AppError(409, 'SLUG_TAKEN', 'A plan with that identifier already exists'); throw e; }
-  const paystackSync = priceChanged || intervalChanged || patch.name ? await syncPaystack(plan) : 'unchanged';
+  const billingChanged = priceChanged || currencyChanged || intervalChanged;
+  const paystackSync = billingChanged || patch.name
+    ? await syncPaystack(plan, { recreate: currencyChanged, billingChanged })
+    : 'unchanged';
   await audit(admin, 'plan.update', { type: 'system', id, label: plan.name }, { ...patch, paystackSync }, ip);
   return { plan: planView(plan), paystackSync };
 }

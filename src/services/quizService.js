@@ -39,6 +39,15 @@ async function assertCanAddQuiz(ownerId, ent) {
     throw planLimit('maxQuizzes', ent.limits.maxQuizzes, `Your ${ent.plan.name} plan allows ${ent.limits.maxQuizzes} quizzes. Upgrade to create more.`);
   }
 }
+async function assertCanEditQuiz(ownerId, ent) {
+  const max = ent.limits.maxQuizzes;
+  if (max === -1) return;
+  const count = await Quiz.countDocuments({ ownerId });
+  if (count > max) {
+    const extra = count - max;
+    throw planLimit('maxQuizzes', max, `You have ${count} quizzes, but your ${ent.plan.name} plan allows ${max}. Delete ${extra} extra ${extra === 1 ? 'quiz' : 'quizzes'} before editing.`);
+  }
+}
 function assertQuestionCount(ent, n) {
   const max = ent.limits.maxQuestionsPerQuiz;
   if (max !== -1 && n > max) throw planLimit('maxQuestionsPerQuiz', max, `Your ${ent.plan.name} plan allows ${max} questions per quiz. Remove some or upgrade.`);
@@ -52,8 +61,10 @@ export async function create(ownerId, data) {
 }
 
 export async function update(ownerId, id, data) {
-  assertQuestionCount(await entitlementsFor(ownerId), data.questions.length);
   const quiz = await getOwned(ownerId, id);
+  const ent = await entitlementsFor(ownerId);
+  await assertCanEditQuiz(ownerId, ent);
+  assertQuestionCount(ent, data.questions.length);
   quiz.title = data.title;
   quiz.description = data.description;
   quiz.questions = data.questions;

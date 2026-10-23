@@ -47,9 +47,10 @@ export async function overview(user) {
 }
 
 async function ensurePaystackPlan(plan) {
-  if (plan.paystackPlanCode) return plan.paystackPlanCode;
+  const mode = ps.paystackMode();
+  if (plan.paystackPlanCode && plan.paystackMode === mode) return plan.paystackPlanCode;
   const data = await ps.createPlan({ name: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, interval: plan.interval });
-  await Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: data.plan_code } });
+  await Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: data.plan_code, paystackMode: mode } });
   return data.plan_code;
 }
 

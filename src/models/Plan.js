@@ -18,5 +18,6 @@ const planSchema = new mongoose.Schema({
   isDefault: { type: Boolean, default: false }, // the plan everyone without a subscription gets
   sortOrder: { type: Number, default: 0 },
   paystackPlanCode: { type: String },
+  paystackMode: { type: String, enum: ['test', 'live', 'unknown'] },
 }, { timestamps: true });
 export const Plan = mongoose.model('Plan', planSchema);
