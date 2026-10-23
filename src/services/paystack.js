@@ -15,7 +15,10 @@ async function call(method, path, body) {
     });
   } catch { throw new AppError(502, 'PAYSTACK_UNREACHABLE', 'Could not reach Paystack. Please try again.'); }
   const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.status === false) throw new AppError(502, 'PAYSTACK_ERROR', json.message || 'Paystack rejected the request');
+  if (!res.ok || json.status === false) {
+    const code = /plan\s+(?:id\/code|code).*invalid/i.test(json.message || '') ? 'PAYSTACK_INVALID_PLAN' : 'PAYSTACK_ERROR';
+    throw new AppError(502, code, json.message || 'Paystack rejected the request');
+  }
   return json.data;
 }
 

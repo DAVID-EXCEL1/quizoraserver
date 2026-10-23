@@ -318,7 +318,24 @@ export async function removeSticker(admin, id, ip) {
 /* ---- plans ---- */
 export async function listPlans() {
   const plans = await Plan.find({}).sort({ sortOrder: 1, priceMinor: 1 }).lean();
-  return Promise.all(plans.map(async (p) => ({ ...planView(p), subscribers: await Subscription.countDocuments({ planId: p._id, status: { $in: ['active', 'non_renewing', 'past_due'] } }) })));
+  const now = new Date();
+  const liveSubscription = {
+    status: { $in: ['active', 'non_renewing', 'past_due'] },
+    $or: [{ currentPeriodEnd: null }, { currentPeriodEnd: { $gt: now } }],
+  };
+  const defaultPlan = plans.find((p) => p.isDefault);
+  const [userCount, defaultPlanSubscribers] = defaultPlan
+    ? await Promise.all([
+      User.countDocuments({}),
+      Subscription.distinct('userId', { ...liveSubscription, planId: { $ne: defaultPlan._id } }),
+    ])
+    : [0, []];
+  return Promise.all(plans.map(async (p) => ({
+    ...planView(p),
+    subscribers: p.isDefault
+      ? userCount - defaultPlanSubscribers.length
+      : await Subscription.countDocuments({ ...liveSubscription, planId: p._id }),
+  })));
 }
 
 async function syncPaystack(plan, { recreate = false, billingChanged = false } = {}) {

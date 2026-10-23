@@ -46,12 +46,18 @@ export async function overview(user) {
   };
 }
 
+async function createPaystackPlan(plan) {
+  const data = await ps.createPlan({ name: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, interval: plan.interval });
+  await Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: data.plan_code, paystackMode: ps.paystackMode() } });
+  plan.paystackPlanCode = data.plan_code;
+  plan.paystackMode = ps.paystackMode();
+  return data.plan_code;
+}
+
 async function ensurePaystackPlan(plan) {
   const mode = ps.paystackMode();
   if (plan.paystackPlanCode && plan.paystackMode === mode) return plan.paystackPlanCode;
-  const data = await ps.createPlan({ name: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, interval: plan.interval });
-  await Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: data.plan_code, paystackMode: mode } });
-  return data.plan_code;
+  return createPaystackPlan(plan);
 }
 
 export async function startCheckout(user, planId) {
@@ -63,10 +69,18 @@ export async function startCheckout(user, planId) {
   const planCode = await ensurePaystackPlan(plan);
   const reference = `qz_${randomToken(12)}`;
   await Payment.create({ reference, userId: user._id, planId: plan._id, planName: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, status: 'pending' });
-  const tx = await ps.initTransaction({
+  const transaction = {
     email: user.email, amountMinor: plan.priceMinor, currency: plan.currency, planCode, reference,
     callbackUrl: `${env.clientUrl}/billing/callback`, metadata: { planId: String(plan._id) }, // metadata is informational; our Payment row is the source of truth
-  });
+  };
+  let tx;
+  try {
+    tx = await ps.initTransaction(transaction);
+  } catch (error) {
+    if (error.code !== 'PAYSTACK_INVALID_PLAN') throw error;
+    transaction.planCode = await createPaystackPlan(plan);
+    tx = await ps.initTransaction(transaction);
+  }
   return { authorizationUrl: tx.authorization_url, reference };
 }
 

@@ -106,6 +106,39 @@ describe('checkout and verification', () => {
     const q = await publishedQuiz(h, { n: 1 });
     expect((await models.Room.findOne({ code: (await launch(h, q.id)).room.code })).maxPlayers).toBe(100);
   });
+  it('recreates a stale cached Paystack plan code and retries checkout', async () => {
+    const h = await newHost(app);
+    const plan = await models.Plan.findById(pro._id);
+    const originalCode = plan.paystackPlanCode;
+    const originalMode = plan.paystackMode;
+    await models.Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: 'PLN_STALE', paystackMode: 'test' } });
+    let attempts = 0;
+    const stalePlan = mockFetch([[/api\.paystack\.co\/transaction\/initialize/, ({ body }) => {
+      attempts++;
+      return attempts === 1
+        ? { status: 400, body: { status: false, message: 'Plan ID/code specified is invalid' } }
+        : { body: { status: true, data: { authorization_url: `https://checkout.paystack.com/${body.reference}`, reference: body.reference } } };
+    }]]);
+    let reference;
+    try {
+      const c = await checkout(h, String(pro._id));
+      expect(c.status).toBe(200);
+      reference = c.body.data.reference;
+      expect(attempts).toBe(2);
+      const refreshed = await models.Plan.findById(plan._id).lean();
+      expect(refreshed.paystackPlanCode).not.toBe('PLN_STALE');
+      expect(refreshed.paystackMode).toBe('test');
+    } finally {
+      stalePlan.restore();
+      if (reference) await models.Payment.deleteOne({ reference });
+      const update = {};
+      if (originalCode === undefined) update.$unset = { ...(update.$unset || {}), paystackPlanCode: 1 };
+      else update.$set = { ...(update.$set || {}), paystackPlanCode: originalCode };
+      if (originalMode === undefined) update.$unset = { ...(update.$unset || {}), paystackMode: 1 };
+      else update.$set = { ...(update.$set || {}), paystackMode: originalMode };
+      await models.Plan.updateOne({ _id: plan._id }, update);
+    }
+  });
   it('recreates cached Paystack plans when switching from test to live credentials', async () => {
     const h = await newHost(app);
     const plan = await models.Plan.findOne({ slug: 'business' });
@@ -211,6 +244,26 @@ describe('Paystack webhooks', () => {
 });
 
 describe('admin billing controls', () => {
+  it('counts default Free users even though they have no subscription record', async () => {
+    const counts = async () => (await admin.get(A('/plans'))).body.data;
+    const before = await counts();
+    const freeBefore = before.find((p) => p.slug === 'free').subscribers;
+    const proBefore = before.find((p) => p.slug === 'pro').subscribers;
+    const u = await newHost(app);
+
+    let after = await counts();
+    expect(after.find((p) => p.slug === 'free').subscribers).toBe(freeBefore + 1);
+
+    await admin.post(A(`/users/${u.user.id}/plan`), { planId: String(pro._id) });
+    after = await counts();
+    expect(after.find((p) => p.slug === 'free').subscribers).toBe(freeBefore);
+    expect(after.find((p) => p.slug === 'pro').subscribers).toBe(proBefore + 1);
+
+    await admin.post(A(`/users/${u.user.id}/plan`), { planId: String(free._id) });
+    after = await counts();
+    expect(after.find((p) => p.slug === 'free').subscribers).toBe(freeBefore + 1);
+    expect(after.find((p) => p.slug === 'pro').subscribers).toBe(proBefore);
+  });
   it('creates, edits, defaults and deletes plans, syncing price changes to Paystack', async () => {
     const created = await admin.post(A('/plans'), { name: 'Team', slug: 'team', priceMinor: 900000, limits: { maxPlayersPerGame: 250 }, features: { ai: false } });
     expect(created.status).toBe(201);
