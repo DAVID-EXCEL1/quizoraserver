@@ -5,6 +5,7 @@ const subSchema = new mongoose.Schema({
   planId: { type: mongoose.Schema.Types.ObjectId, ref: 'Plan', required: true },
   status: { type: String, enum: ['active', 'non_renewing', 'past_due', 'canceled'], default: 'active' },
   source: { type: String, enum: ['paystack', 'admin'], default: 'paystack' },
+  autoRenew: { type: Boolean, default: false },
   currentPeriodEnd: { type: Date, default: null }, // null = no expiry (admin grants only)
   paystackCustomerCode: { type: String, index: true },
   paystackSubscriptionCode: { type: String },

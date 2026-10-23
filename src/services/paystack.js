@@ -24,8 +24,8 @@ async function call(method, path, body) {
 
 const intervalFor = (i) => (i === 'yearly' ? 'annually' : 'monthly');
 
-export const initTransaction = ({ email, amountMinor, currency, planCode, reference, callbackUrl, metadata }) =>
-  call('POST', '/transaction/initialize', { email, amount: amountMinor, currency, plan: planCode, reference, callback_url: callbackUrl, metadata });
+export const initTransaction = ({ email, amountMinor, currency, planCode, reference, callbackUrl, metadata, channels }) =>
+  call('POST', '/transaction/initialize', { email, amount: amountMinor, currency, ...(planCode ? { plan: planCode } : {}), reference, callback_url: callbackUrl, metadata, ...(channels ? { channels } : {}) });
 export const verifyTransaction = (reference) => call('GET', `/transaction/verify/${encodeURIComponent(reference)}`);
 export const createPlan = ({ name, amountMinor, currency, interval }) => call('POST', '/plan', { name, amount: amountMinor, currency, interval: intervalFor(interval) });
 export const updatePlan = (code, { name, amountMinor, interval }) => call('PUT', `/plan/${encodeURIComponent(code)}`, { name, amount: amountMinor, interval: intervalFor(interval), update_existing_subscriptions: false });

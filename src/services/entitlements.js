@@ -32,7 +32,9 @@ export async function entitlementsFor(userId) {
   };
   return {
     plan: plan ? { id: String(plan._id), name: plan.name, slug: plan.slug } : { id: null, name: base.name, slug: base.slug },
-    source, periodEnd, subscriptionStatus: sub?.status || null, limits, features, overridden: LIMIT_KEYS.filter((k) => Number.isInteger(user?.planOverrides?.[k])),
+    source, periodEnd, subscriptionStatus: sub?.status || null,
+    autoRenew: sub ? (sub.autoRenew ?? Boolean(sub.paystackSubscriptionCode)) : false,
+    limits, features, overridden: LIMIT_KEYS.filter((k) => Number.isInteger(user?.planOverrides?.[k])),
   };
 }
 

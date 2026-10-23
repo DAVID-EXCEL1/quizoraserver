@@ -7,6 +7,7 @@ const paymentSchema = new mongoose.Schema({
   kind: { type: String, enum: ['checkout', 'renewal'], default: 'checkout' },
   amountMinor: { type: Number, required: true },
   currency: { type: String, required: true },
+  autoRenew: { type: Boolean, default: false },
   status: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
   paidAt: Date,
   paystackTransactionId: String,

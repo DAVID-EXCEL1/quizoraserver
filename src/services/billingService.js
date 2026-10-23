@@ -41,23 +41,9 @@ export async function overview(user) {
   return {
     billingEnabled: settings.features.billing, paymentsConfigured: ps.paystackConfigured(), currency: settings.billing.currency,
     entitlements: ent, usage: { quizzes, aiThisMonth: usage },
-    subscription: sub ? { status: sub.status, source: sub.source, currentPeriodEnd: sub.currentPeriodEnd, planId: String(sub.planId) } : null,
+    subscription: sub ? { status: sub.status, source: sub.source, autoRenew: sub.autoRenew ?? Boolean(sub.paystackSubscriptionCode), currentPeriodEnd: sub.currentPeriodEnd, planId: String(sub.planId) } : null,
     plans: plans.map(planView),
   };
-}
-
-async function createPaystackPlan(plan) {
-  const data = await ps.createPlan({ name: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, interval: plan.interval });
-  await Plan.updateOne({ _id: plan._id }, { $set: { paystackPlanCode: data.plan_code, paystackMode: ps.paystackMode() } });
-  plan.paystackPlanCode = data.plan_code;
-  plan.paystackMode = ps.paystackMode();
-  return data.plan_code;
-}
-
-async function ensurePaystackPlan(plan) {
-  const mode = ps.paystackMode();
-  if (plan.paystackPlanCode && plan.paystackMode === mode) return plan.paystackPlanCode;
-  return createPaystackPlan(plan);
 }
 
 export async function startCheckout(user, planId) {
@@ -66,21 +52,19 @@ export async function startCheckout(user, planId) {
   const plan = await Plan.findOne({ _id: planId, active: true });
   if (!plan) throw notFound('Plan');
   if (plan.isDefault || plan.priceMinor <= 0) throw new AppError(400, 'FREE_PLAN', 'That plan is free; there’s nothing to pay for');
-  const planCode = await ensurePaystackPlan(plan);
-  const reference = `qz_${randomToken(12)}`;
-  await Payment.create({ reference, userId: user._id, planId: plan._id, planName: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, status: 'pending' });
-  const transaction = {
-    email: user.email, amountMinor: plan.priceMinor, currency: plan.currency, planCode, reference,
-    callbackUrl: `${env.clientUrl}/billing/callback`, metadata: { planId: String(plan._id) }, // metadata is informational; our Payment row is the source of truth
-  };
-  let tx;
-  try {
-    tx = await ps.initTransaction(transaction);
-  } catch (error) {
-    if (error.code !== 'PAYSTACK_INVALID_PLAN') throw error;
-    transaction.planCode = await createPaystackPlan(plan);
-    tx = await ps.initTransaction(transaction);
+  const subscription = await Subscription.findOne({ userId: user._id }).lean();
+  if (subscription && ['active', 'past_due'].includes(subscription.status)
+    && (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > new Date())
+    && (subscription.autoRenew ?? Boolean(subscription.paystackSubscriptionCode))) {
+    throw new AppError(409, 'CANCEL_BEFORE_SWITCH', 'Cancel your automatic renewal before switching plans or paying again.');
   }
+  const reference = `qz_${randomToken(12)}`;
+  await Payment.create({ reference, userId: user._id, planId: plan._id, planName: plan.name, amountMinor: plan.priceMinor, currency: plan.currency, autoRenew: false, status: 'pending' });
+  const tx = await ps.initTransaction({
+    email: user.email, amountMinor: plan.priceMinor, currency: plan.currency, reference,
+    callbackUrl: `${env.clientUrl}/billing/callback`, metadata: { planId: String(plan._id) },
+    ...(plan.currency === 'NGN' ? { channels: ['bank_transfer', 'bank', 'card'] } : {}),
+  });
   return { authorizationUrl: tx.authorization_url, reference };
 }
 
@@ -95,8 +79,11 @@ export async function activateFromTransaction(payment, tx) {
   const won = await Payment.findOneAndUpdate({ _id: payment._id, status: 'pending' }, { $set: { status: 'success', paidAt: new Date(), paystackTransactionId: String(tx.id ?? '') } });
   if (!won) return { activated: false, reason: 'already_processed' };
   const plan = await Plan.findById(payment.planId).lean();
+  const now = new Date();
+  const existing = await Subscription.findOne({ userId: payment.userId }).lean();
+  const periodStart = String(existing?.planId) === String(payment.planId) && existing.currentPeriodEnd > now ? existing.currentPeriodEnd : now;
   await Subscription.updateOne({ userId: payment.userId }, {
-    $set: { planId: payment.planId, status: 'active', source: 'paystack', currentPeriodEnd: addInterval(new Date(), plan?.interval), paystackCustomerCode: tx.customer?.customer_code, lastPaymentAt: new Date() },
+    $set: { planId: payment.planId, status: 'active', source: 'paystack', autoRenew: payment.autoRenew ?? false, currentPeriodEnd: addInterval(periodStart, plan?.interval), paystackCustomerCode: tx.customer?.customer_code, lastPaymentAt: now },
   }, { upsert: true });
   return { activated: true };
 }
@@ -115,7 +102,7 @@ export async function cancelSubscription(user) {
   const sub = await Subscription.findOne({ userId: user._id }).select('+emailToken');
   if (!sub || sub.source !== 'paystack') throw new AppError(404, 'NO_SUBSCRIPTION', 'You don’t have a paid subscription to cancel');
   if (sub.paystackSubscriptionCode && sub.emailToken) await ps.disableSubscription({ code: sub.paystackSubscriptionCode, token: sub.emailToken });
-  await Subscription.updateOne({ _id: sub._id }, { $set: { status: 'non_renewing' } }); // access continues until the period ends
+  await Subscription.updateOne({ _id: sub._id }, { $set: { status: 'non_renewing', autoRenew: false } }); // access continues until the period ends
   return { status: 'non_renewing', currentPeriodEnd: sub.currentPeriodEnd };
 }
 
@@ -149,7 +136,7 @@ async function onSubscriptionCreate(data) {
   const found = await userForCustomer(data.customer);
   if (!found) return null;
   const plan = data.plan?.plan_code ? await Plan.findOne({ paystackPlanCode: data.plan.plan_code }) : null;
-  const set = { paystackSubscriptionCode: data.subscription_code, emailToken: data.email_token, paystackCustomerCode: data.customer?.customer_code };
+  const set = { paystackSubscriptionCode: data.subscription_code, emailToken: data.email_token, paystackCustomerCode: data.customer?.customer_code, autoRenew: true };
   if (data.next_payment_date) set.currentPeriodEnd = new Date(data.next_payment_date);
   if (found.sub) return Subscription.updateOne({ _id: found.sub._id }, { $set: set });
   if (!plan) return null;
@@ -158,7 +145,7 @@ async function onSubscriptionCreate(data) {
 
 async function onSubscriptionEnd(data) {
   const found = await userForCustomer(data.customer);
-  if (found?.sub?.source === 'paystack') await Subscription.updateOne({ _id: found.sub._id }, { $set: { status: 'non_renewing' } });
+  if (found?.sub?.source === 'paystack') await Subscription.updateOne({ _id: found.sub._id }, { $set: { status: 'non_renewing', autoRenew: false } });
 }
 
 async function onPaymentFailed(data) {

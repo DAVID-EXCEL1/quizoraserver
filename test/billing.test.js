@@ -86,9 +86,10 @@ describe('checkout and verification', () => {
     expect(c.body.data.authorizationUrl).toContain(c.body.data.reference);
     const init = mock.calls.filter((x) => x.url.includes('/transaction/initialize')).at(-1).body;
     expect(init).toMatchObject({ email: h.email, amount: 500000, currency: 'NGN', callback_url: 'http://localhost:5173/billing/callback' });
-    expect(init.plan).toMatch(/^PLN_/);
+    expect(init.plan).toBeUndefined();
+    expect(init.channels).toEqual(expect.arrayContaining(['bank_transfer', 'card']));
     const pay = await models.Payment.findOne({ reference: c.body.data.reference }).lean();
-    expect(pay).toMatchObject({ status: 'pending', amountMinor: 500000, planName: 'Pro' });
+    expect(pay).toMatchObject({ status: 'pending', amountMinor: 500000, planName: 'Pro', autoRenew: false });
     expect((await h.get('/api/billing')).body.data.entitlements.plan.slug).toBe('free'); // not yet
 
     const abandoned = await h.post('/api/billing/verify', { reference: c.body.data.reference });
@@ -96,7 +97,7 @@ describe('checkout and verification', () => {
     succeed(c.body.data.reference, h.user);
     const v = await h.post('/api/billing/verify', { reference: c.body.data.reference });
     expect(v.body.data.status).toBe('success');
-    expect(v.body.data.entitlements).toMatchObject({ source: 'subscription', plan: { slug: 'pro' }, limits: { maxPlayersPerGame: 100 } });
+    expect(v.body.data.entitlements).toMatchObject({ source: 'subscription', autoRenew: false, plan: { slug: 'pro' }, limits: { maxPlayersPerGame: 100 } });
     await h.post('/api/billing/verify', { reference: c.body.data.reference }); // idempotent
     expect(await models.Subscription.countDocuments({ userId: h.user.id })).toBe(1);
     expect(await models.Payment.countDocuments({ userId: h.user.id, status: 'success' })).toBe(1);
@@ -105,6 +106,33 @@ describe('checkout and verification', () => {
     // the plan unlocks a bigger game right away
     const q = await publishedQuiz(h, { n: 1 });
     expect((await models.Room.findOne({ code: (await launch(h, q.id)).room.code })).maxPlayers).toBe(100);
+  });
+  it('uses one-time payments for manual renewals and extends the same plan from its existing end date', async () => {
+    const h = await newHost(app);
+    const first = (await checkout(h, String(pro._id))).body.data;
+    succeed(first.reference, h.user);
+    await h.post('/api/billing/verify', { reference: first.reference });
+    const end = new Date(Date.now() + 10 * 86400000);
+    await models.Subscription.updateOne({ userId: h.user.id }, { $set: { currentPeriodEnd: end } });
+
+    const renewal = (await checkout(h, String(pro._id))).body.data;
+    const init = mock.calls.filter((x) => x.url.includes('/transaction/initialize')).at(-1).body;
+    expect(init.plan).toBeUndefined();
+    expect(init.channels).toContain('bank_transfer');
+    succeed(renewal.reference, h.user);
+    const result = await h.post('/api/billing/verify', { reference: renewal.reference });
+    const sub = await models.Subscription.findOne({ userId: h.user.id }).lean();
+    expect(result.body.data.entitlements.autoRenew).toBe(false);
+    expect(+sub.currentPeriodEnd).toBeGreaterThan(+end + 27 * 86400000);
+    expect(sub.paystackSubscriptionCode).toBeUndefined();
+  });
+  it('prevents buying another plan before an active automatic subscription is canceled', async () => {
+    const h = await newHost(app);
+    await models.Subscription.create({ userId: h.user.id, planId: pro._id, source: 'paystack', status: 'active', autoRenew: true, paystackSubscriptionCode: 'SUB_ACTIVE' });
+    const business = await models.Plan.findOne({ slug: 'business' });
+    const response = await checkout(h, String(business._id));
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('CANCEL_BEFORE_SWITCH');
   });
   it('recreates a stale cached Paystack plan code and retries checkout', async () => {
     const h = await newHost(app);
@@ -218,7 +246,7 @@ describe('Paystack webhooks', () => {
     const next = new Date(Date.now() + 29 * 86400000).toISOString();
     await hook('subscription.create', { subscription_code: 'SUB_1', email_token: 'tok_secret', next_payment_date: next, customer, plan: { plan_code: pro.paystackPlanCode } });
     let sub = await models.Subscription.findOne({ userId: h.user.id }).select('+emailToken').lean();
-    expect(sub).toMatchObject({ paystackSubscriptionCode: 'SUB_1', emailToken: 'tok_secret', status: 'active' });
+    expect(sub).toMatchObject({ paystackSubscriptionCode: 'SUB_1', emailToken: 'tok_secret', autoRenew: true, status: 'active' });
     expect(Math.abs(+sub.currentPeriodEnd - +new Date(next))).toBeLessThan(1000);
 
     const renewal = { reference: 'renew_1', status: 'success', amount: 500000, currency: 'NGN', id: 2, customer, plan: { plan_code: pro.paystackPlanCode } };
@@ -265,6 +293,7 @@ describe('admin billing controls', () => {
     expect(after.find((p) => p.slug === 'pro').subscribers).toBe(proBefore);
   });
   it('creates, edits, defaults and deletes plans, syncing price changes to Paystack', async () => {
+    await models.Plan.updateOne({ _id: pro._id }, { $set: { paystackPlanCode: 'PLN_TEST_EXISTING', paystackMode: 'test' } });
     const created = await admin.post(A('/plans'), { name: 'Team', slug: 'team', priceMinor: 900000, limits: { maxPlayersPerGame: 250 }, features: { ai: false } });
     expect(created.status).toBe(201);
     expect(created.body.data).toMatchObject({ name: 'Team', currency: 'NGN', limits: { maxPlayersPerGame: 250, maxQuizzes: 5 }, features: { ai: false, chat: true } });
@@ -304,7 +333,8 @@ describe('admin billing controls', () => {
     const h = await newHost(app);
     const c = await checkout(h, String(pro._id));
     expect(c.status).toBe(200);
-    expect((await models.Plan.findById(pro._id)).paystackMode).toBe('test');
+    expect((await models.Plan.findById(pro._id)).paystackPlanCode).toBeUndefined();
+    expect(mock.calls.filter((x) => x.url.includes('/transaction/initialize')).at(-1).body.plan).toBeUndefined();
   });
   it('grants and revokes plans, sets per-user limits, and keeps paid subscriptions safe', async () => {
     const u = await newHost(app);

@@ -441,7 +441,7 @@ export async function grantPlan(admin, userId, planId, endsAt, ip) {
   if (existing?.source === 'paystack' && ['active', 'past_due'].includes(existing.status) && (!existing.currentPeriodEnd || existing.currentPeriodEnd > new Date())) {
     throw new AppError(409, 'HAS_PAID_SUBSCRIPTION', 'This user has an active paid subscription. Ask them to cancel it first, or use limit overrides instead.');
   }
-  await Subscription.updateOne({ userId }, { $set: { planId, status: 'active', source: 'admin', currentPeriodEnd: endsAt || null }, $unset: { paystackSubscriptionCode: 1, emailToken: 1 } }, { upsert: true });
+  await Subscription.updateOne({ userId }, { $set: { planId, status: 'active', source: 'admin', autoRenew: false, currentPeriodEnd: endsAt || null }, $unset: { paystackSubscriptionCode: 1, emailToken: 1 } }, { upsert: true });
   await audit(admin, 'user.grant_plan', { type: 'user', id: userId, label: t.email }, { plan: plan.name, endsAt: endsAt ? endsAt.toISOString() : 'never' }, ip);
 }
 
