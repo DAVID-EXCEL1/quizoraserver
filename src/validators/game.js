@@ -22,3 +22,4 @@ export const answerSchema = z.object({
 }).strict();
 
 export const hostActionSchema = z.object({ action: z.enum(['start', 'close', 'leaderboard', 'next', 'end']) }).strict();
+export const questionVisibilitySchema = z.object({ showQuestionsToPlayers: z.boolean() }).strict();

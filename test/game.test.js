@@ -21,6 +21,7 @@ describe('9. room creation & PIN uniqueness', () => {
     game = await launch(host, quiz.id);
     expect(game.room.code).toMatch(/^[A-Z0-9]{6}$/);
     expect(game.state.status).toBe('LOBBY');
+    expect(game.state.showQuestionsToPlayers).toBe(true);
     expect(game.joinUrl).toBe(`http://localhost:5173/join/${game.room.code}`);
     expect(game.hostUrl).toBe(`http://localhost:5173/host/${game.room.code}`);
     expect(game.qrCode).toMatch(/^data:image\/png;base64,/);

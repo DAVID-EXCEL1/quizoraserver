@@ -17,6 +17,12 @@ export function publicQuestion(room, idx = room.currentQuestionIndex) {
   };
 }
 
+export function playerQuestion(room, idx = room.currentQuestionIndex) {
+  const question = publicQuestion(room, idx);
+  if (!question || room.showQuestionsToPlayers !== false) return question;
+  return { ...question, text: '', imageUrl: null };
+}
+
 const lbRow = (p) => ({
   rank: p.rank, id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', score: p.score, correctCount: p.correctCount, streak: p.streak, bestStreak: p.bestStreak,
 });
@@ -38,8 +44,9 @@ export async function boardRows(room, ranked, limit = 10) {
 }
 
 const chatInfo = (room, settings) => {
-  const on = room.features?.chat !== false && settings.features.chat && room.chatMode !== 'off';
-  return { enabled: on, mode: room.chatMode || 'between', paused: on && room.chatMode === 'between' && room.status === 'QUESTION_ACTIVE', maxLength: settings.chat.maxLength };
+  const available = room.features?.chat !== false && settings.features.chat;
+  const enabled = available && room.chatMode !== 'off';
+  return { available, enabled, mode: room.chatMode || 'between', paused: enabled && room.chatMode === 'between' && room.status === 'QUESTION_ACTIVE', maxLength: settings.chat.maxLength };
 };
 
 export async function leaderboard(roomId) {
@@ -69,18 +76,19 @@ export async function playerView(room, player) {
     totalQuestions: room.snapshot.questions.length,
     questionIndex: room.currentQuestionIndex >= 0 ? room.currentQuestionIndex : null,
     playerCount: ranked.length,
+    showQuestionsToPlayers: room.showQuestionsToPlayers !== false,
     chat: { ...chatInfo(room, settings), muted: !!player.muted },
     features: { stickers: room.features?.stickers !== false && settings.features.stickers },
     me: { id: String(player._id), nickname: player.nickname, sticker: player.sticker || '', score: me?.score ?? 0, rank: me?.rank ?? null, streak: me?.streak ?? 0, correctCount: me?.correctCount ?? 0 },
   };
   const q = room.snapshot.questions[room.currentQuestionIndex];
   if (room.status === 'QUESTION_ACTIVE') {
-    view.question = publicQuestion(room);
+    view.question = playerQuestion(room);
     const mine = await Answer.findOne({ roomId: room._id, playerId: player._id, qid: q.qid }).select('optionKey').lean();
     view.myAnswer = mine ? { optionKey: mine.optionKey } : null;
   }
   if (revealed(room) && q) {
-    view.question = { ...publicQuestion(room), deadline: +room.questionDeadline };
+    view.question = { ...playerQuestion(room), deadline: +room.questionDeadline };
     if (scored(room)) {
       const mine = await Answer.findOne({ roomId: room._id, playerId: player._id, qid: q.qid }).lean();
       const { counts } = await optionCounts(room);
@@ -106,6 +114,7 @@ export async function hostView(room) {
     questionIndex: room.currentQuestionIndex >= 0 ? room.currentQuestionIndex : null,
     isLastQuestion: room.currentQuestionIndex === room.snapshot.questions.length - 1,
     playerCount: ranked.length, maxPlayers: room.maxPlayers || null,
+    showQuestionsToPlayers: room.showQuestionsToPlayers !== false,
     chat: chatInfo(room, settings), stickersEnabled: room.features?.stickers !== false && settings.features.stickers,
     players: [...ranked].sort((a, b) => +new Date(a.joinedAt) - +new Date(b.joinedAt)).map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', connected: p.connected, score: p.score, muted: !!p.muted })),
   };

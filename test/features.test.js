@@ -119,6 +119,43 @@ describe('leaderboard rows carry what changed (for the animation)', () => {
   });
 });
 
+describe('host question visibility', () => {
+  it('hides only the prompt and image from players while preserving choices and answers', async () => {
+    const g = await newRoom(1);
+    const player = (await J(g.room.code, 'Question Player')).body.data;
+    await models.Room.updateOne({ _id: g.room.id }, { $set: { 'snapshot.questions.0.imageUrl': 'https://example.test/question.png' } });
+    const hs = await connectHost(app, host);
+    await ack(hs, 'host:join', { roomCode: g.room.code });
+    const ps = await connectPlayer(app, g.room.code, player.token);
+    const restored = (await request(app.server).get(`/api/rooms/${g.room.code}/state`).set('X-Player-Token', player.token)).body.data;
+    expect(restored.showQuestionsToPlayers).toBe(true);
+
+    const hidden = await ack(hs, 'host:question-visibility', { showQuestionsToPlayers: false });
+    expect(hidden.ok).toBe(true);
+    expect(hidden.data.showQuestionsToPlayers).toBe(false);
+    expect((await ack(hs, 'chat:mode', { mode: 'off' })).ok).toBe(true);
+    const chatOff = (await request(app.server).get(`/api/rooms/${g.room.code}/state`).set('X-Player-Token', player.token)).body.data;
+    expect(chatOff.showQuestionsToPlayers).toBe(false);
+    expect(chatOff.chat).toMatchObject({ available: true, enabled: false, mode: 'off' });
+    expect((await ack(hs, 'chat:mode', { mode: 'between' })).ok).toBe(true);
+
+    const started = once(ps, 'question:started');
+    expect((await ack(hs, 'host:command', { action: 'start' })).ok).toBe(true);
+    const question = await started;
+    expect(question).toMatchObject({ text: '', imageUrl: null, showQuestionsToPlayers: false });
+    expect(question.options).toHaveLength(4);
+    expect((await ack(ps, 'answer:submit', { questionIndex: 0, optionKey: 'A' })).ok).toBe(true);
+
+    const playerState = (await request(app.server).get(`/api/rooms/${g.room.code}/state`).set('X-Player-Token', player.token)).body.data;
+    expect(playerState.question).toMatchObject({ text: '', imageUrl: null });
+    expect(playerState.question.options).toHaveLength(4);
+    expect((await ack(hs, 'host:question-visibility', { showQuestionsToPlayers: true })).error.code).toBe('ILLEGAL_TRANSITION');
+    expect((await ack(hs, 'host:question-visibility', { showQuestionsToPlayers: 'true' })).ok).toBe(false);
+    hs.disconnect();
+    ps.disconnect();
+  });
+});
+
 describe('chat', () => {
   let g; let p1; let p2; let hs; let s1; let s2;
   const send = (s, text) => ack(s, 'chat:send', { text });

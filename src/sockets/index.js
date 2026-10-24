@@ -12,7 +12,7 @@ import { getOwnedRoom } from '../services/roomService.js';
 import { hostView, playerView } from '../services/views.js';
 import * as game from '../services/gameService.js';
 import { User } from '../models/index.js';
-import { answerSchema, hostActionSchema } from '../validators/game.js';
+import { answerSchema, hostActionSchema, questionVisibilitySchema } from '../validators/game.js';
 import * as chat from '../services/chatService.js';
 import { z } from 'zod';
 import { objectId } from '../validators/common.js';
@@ -146,6 +146,14 @@ function wireHost(io, socket) {
     return { muted: !!payload?.muted };
   }));
   socket.on('chat:mode', handle(async (payload) => { await stillAuthorized(); const room = await ownedRoom(); await chat.setMode(room._id, payload?.mode); await game.pushHostState(room._id); return { mode: payload.mode }; }));
+
+  socket.on('host:question-visibility', handle(async (payload) => {
+    if (!socketAllow(socket, 'cmd', 20, 10_000)) throw new AppError(429, 'RATE_LIMITED', 'Slow down');
+    await stillAuthorized();
+    const { showQuestionsToPlayers } = questionVisibilitySchema.parse(payload);
+    if (!socket.data.roomCode) throw new AppError(409, 'NOT_JOINED', 'Join a room first');
+    return hostView(await game.setQuestionVisibility(socket.data.roomCode, userId, showQuestionsToPlayers));
+  }));
 
   socket.on('host:command', handle(async (payload) => {
     if (!socketAllow(socket, 'cmd', 20, 10_000)) throw new AppError(429, 'RATE_LIMITED', 'Slow down');

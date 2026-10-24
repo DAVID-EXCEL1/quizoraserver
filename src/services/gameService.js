@@ -6,7 +6,7 @@ import { log } from '../utils/logger.js';
 import { toGame, toHostCtl, toPlayer } from '../sockets/broadcast.js';
 import { computePoints, rankPlayers } from './scoring.js';
 import { getOwnedRoom } from './roomService.js';
-import { publicQuestion, hostView, leaderboard, lbRow, boardRows } from './views.js';
+import { publicQuestion, playerQuestion, hostView, leaderboard, lbRow, boardRows } from './views.js';
 
 const LIVE = ['LOBBY', 'QUESTION_ACTIVE', 'QUESTION_RESULT', 'LEADERBOARD'];
 const bump = (now = new Date()) => ({ lastActivityAt: now, expiresAt: new Date(now.getTime() + env.roomInactivityMs) });
@@ -67,7 +67,7 @@ async function activate(room, from, expectedIdx, nextIdx) {
   });
   if (!updated) return explainFailure(room._id, room.hostId);
   scheduleClose(updated);
-  const payload = { ...publicQuestion(updated), serverNow: Date.now() };
+  const payload = { ...playerQuestion(updated), showQuestionsToPlayers: updated.showQuestionsToPlayers !== false, serverNow: Date.now() };
   toGame(updated._id, 'game:started', { questionIndex: nextIdx });
   toGame(updated._id, 'question:started', payload);
   await pushHostState(updated);
@@ -81,6 +81,20 @@ export async function startGame(code, hostId) {
     throw new AppError(409, 'NO_PLAYERS', 'Wait for at least one player to join');
   }
   return activate(room, 'LOBBY', -1, 0);
+}
+
+export async function setQuestionVisibility(code, hostId, showQuestionsToPlayers) {
+  const room = await getOwnedRoom(code, hostId);
+  if (room.status !== 'LOBBY') return explainFailure(room._id, hostId);
+  const now = new Date();
+  const updated = await Room.findOneAndUpdate(
+    { _id: room._id, hostId, status: 'LOBBY', expiresAt: { $gt: now } },
+    { $set: { showQuestionsToPlayers, ...bump(now) } },
+    { new: true },
+  );
+  if (!updated) return explainFailure(room._id, hostId);
+  await pushHostState(updated);
+  return updated;
 }
 
 export async function nextQuestion(code, hostId) {
