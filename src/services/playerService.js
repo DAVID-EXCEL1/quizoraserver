@@ -6,6 +6,25 @@ import { toGame } from '../sockets/broadcast.js';
 import { getSettings } from './settings.js';
 import { assertValidSticker, randomSticker } from './stickers.js';
 
+// Add this Map at the top of server/src/services/playerService.js (below imports)
+const rosterTimeouts = new Map();
+
+// Replace your existing broadcastRoster function with this:
+export async function broadcastRoster(roomId) {
+  const key = String(roomId);
+  if (rosterTimeouts.has(key)) return; // Already queued within the current window
+  
+  rosterTimeouts.set(key, setTimeout(async () => {
+    rosterTimeouts.delete(key);
+    try {
+      const players = await roster(roomId);
+      toGame(roomId, 'roster:updated', { players, count: players.length });
+    } catch (err) {
+      log.error('broadcastRoster debounce error', err.message);
+    }
+  }, 500)); // Batches updates into a single broadcast every 0.5 seconds
+}
+
 const LIVE = ['LOBBY', 'QUESTION_ACTIVE', 'QUESTION_RESULT', 'LEADERBOARD'];
 export const nicknameKey = (n) => n.normalize('NFKC').toLowerCase();
 
