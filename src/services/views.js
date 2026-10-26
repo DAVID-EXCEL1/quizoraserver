@@ -79,7 +79,7 @@ export async function playerView(room, player) {
     showQuestionsToPlayers: room.showQuestionsToPlayers !== false,
     chat: { ...chatInfo(room, settings), muted: !!player.muted },
     features: { stickers: room.features?.stickers !== false && settings.features.stickers },
-    me: { id: String(player._id), nickname: player.nickname, sticker: player.sticker || '', score: me?.score ?? 0, rank: me?.rank ?? null, streak: me?.streak ?? 0, correctCount: me?.correctCount ?? 0 },
+    me: { id: String(player._id), nickname: player.nickname, sticker: player.sticker || '', location: player.location || '', score: me?.score ?? 0, rank: me?.rank ?? null, streak: me?.streak ?? 0, correctCount: me?.correctCount ?? 0 },
   };
   const q = room.snapshot.questions[room.currentQuestionIndex];
   if (room.status === 'QUESTION_ACTIVE') {
@@ -116,7 +116,7 @@ export async function hostView(room) {
     playerCount: ranked.length, maxPlayers: room.maxPlayers || null,
     showQuestionsToPlayers: room.showQuestionsToPlayers !== false,
     chat: chatInfo(room, settings), stickersEnabled: room.features?.stickers !== false && settings.features.stickers,
-    players: [...ranked].sort((a, b) => +new Date(a.joinedAt) - +new Date(b.joinedAt)).map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', connected: p.connected, score: p.score, muted: !!p.muted })),
+    players: [...ranked].sort((a, b) => +new Date(a.joinedAt) - +new Date(b.joinedAt)).map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', location: p.location || '', connected: p.connected, score: p.score, muted: !!p.muted })),
   };
   if (['QUESTION_ACTIVE', 'QUESTION_RESULT', 'LEADERBOARD'].includes(room.status)) {
     view.question = publicQuestion(room);

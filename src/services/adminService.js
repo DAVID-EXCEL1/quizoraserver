@@ -213,13 +213,13 @@ async function roomByCode(code) {
 
 export async function roomDetail(code) {
   const r = await roomByCode(code);
-  const [players, host] = await Promise.all([Player.find({ roomId: r._id }).sort({ joinedAt: 1 }).select('nickname sticker muted connected score joinedAt').lean(), User.findById(r.hostId).select('fullName email').lean()]);
+  const [players, host] = await Promise.all([Player.find({ roomId: r._id }).sort({ joinedAt: 1 }).select('nickname sticker location muted connected score joinedAt').lean(), User.findById(r.hostId).select('fullName email').lean()]);
   return {
     code: r.code, status: r.status, quizTitle: r.snapshot.title, createdAt: r.createdAt, expiresAt: r.expiresAt, expiredReason: r.expiredReason,
     questionIndex: r.currentQuestionIndex >= 0 ? r.currentQuestionIndex : null, totalQuestions: r.snapshot.questions.length,
     host: host ? { id: String(host._id), fullName: host.fullName, email: host.email } : null,
     chat: { mode: r.chatMode, enabled: r.features?.chat !== false },
-    players: players.map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', muted: !!p.muted, connected: p.connected, score: p.score, joinedAt: p.joinedAt })),
+    players: players.map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', location: p.location || '', muted: !!p.muted, connected: p.connected, score: p.score, joinedAt: p.joinedAt })),
   };
 }
 

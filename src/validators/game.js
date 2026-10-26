@@ -1,7 +1,17 @@
 import { z } from 'zod';
 import { objectId } from './common.js';
 
-export const createRoomSchema = z.object({ quizId: objectId }).strict();
+const locationOptions = z.array(z.string().trim().min(1).max(50)).max(30).optional().default([]);
+export const createRoomSchema = z.object({
+  quizId: objectId,
+  showQuestionsToPlayers: z.boolean().optional().default(true),
+  chatEnabled: z.boolean().optional().default(true),
+  locationOptions,
+}).strict().superRefine((v, ctx) => {
+  if (new Set(v.locationOptions.map((x) => x.toLowerCase())).size !== v.locationOptions.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['locationOptions'], message: 'Locations must be unique' });
+  }
+});
 
 const RESERVED = new Set(['host', 'admin', 'administrator', 'moderator', 'mod', 'dextquiz', 'quizora', 'system', 'staff', 'support', 'teacher', 'null', 'undefined']);
 export const nicknameSchema = z.string()
@@ -13,7 +23,7 @@ export const nicknameSchema = z.string()
     .refine((s) => !RESERVED.has(s.toLowerCase()), 'That nickname is reserved'));
 
 const stickerField = z.string().trim().min(1).max(16);
-export const joinSchema = z.object({ nickname: nicknameSchema, sticker: stickerField.optional() }).strict();
+export const joinSchema = z.object({ nickname: nicknameSchema, sticker: stickerField.optional(), location: z.string().trim().min(1).max(50).optional() }).strict();
 export const playerProfileSchema = z.object({ nickname: nicknameSchema.optional(), sticker: stickerField.optional() }).strict().refine((v) => v.nickname !== undefined || v.sticker !== undefined, 'Nothing to change');
 
 export const answerSchema = z.object({

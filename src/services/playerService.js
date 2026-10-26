@@ -14,15 +14,19 @@ export async function findRoomByCode(code) {
 }
 
 export async function publicRoomInfo(code) {
-  const room = await Room.findOne({ code }).select('code status expiresAt snapshot.title').lean();
+  const room = await Room.findOne({ code }).select('code status expiresAt snapshot.title locationOptions').lean();
   if (!room) throw notFound('Game');
   const expired = room.status === 'EXPIRED' || (room.status !== 'GAME_OVER' && room.expiresAt <= new Date());
-  return { code: room.code, title: room.snapshot.title, status: expired ? 'EXPIRED' : room.status, joinable: !expired && LIVE.includes(room.status) };
+  return {
+    code: room.code, title: room.snapshot.title, status: expired ? 'EXPIRED' : room.status,
+    joinable: !expired && LIVE.includes(room.status),
+    ...(room.locationOptions?.length ? { locationOptions: room.locationOptions } : {}),
+  };
 }
 
 export const roster = async (roomId) => {
-  const ps = await Player.find({ roomId }).sort({ joinedAt: 1 }).select('nickname sticker connected score muted').lean();
-  return ps.map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', connected: p.connected, score: p.score, muted: !!p.muted }));
+  const ps = await Player.find({ roomId }).sort({ joinedAt: 1 }).select('nickname sticker location connected score muted').lean();
+  return ps.map((p) => ({ id: String(p._id), nickname: p.nickname, sticker: p.sticker || '', location: p.location || '', connected: p.connected, score: p.score, muted: !!p.muted }));
 };
 
 export async function broadcastRoster(roomId) {
@@ -31,7 +35,7 @@ export async function broadcastRoster(roomId) {
 }
 
 /** Create a player, or recognise a returning one by their room-scoped token (never by nickname). */
-export async function joinRoom(code, nickname, existingToken, stickerPref) {
+export async function joinRoom(code, nickname, existingToken, stickerPref, location) {
   const room = await Room.findOne({ code });
   if (!room) throw notFound('Game');
   const now = new Date();
@@ -43,6 +47,12 @@ export async function joinRoom(code, nickname, existingToken, stickerPref) {
   if (existingToken) {
     const existing = await Player.findOne({ roomId: room._id, tokenHash: sha256(existingToken), tokenExpiresAt: { $gt: now } });
     if (existing) return { player: existing, room, token: existingToken, reconnected: true };
+  }
+  if (room.locationOptions?.length && !location) {
+    throw new AppError(400, 'LOCATION_REQUIRED', 'Choose a location before joining');
+  }
+  if (location && !room.locationOptions?.includes(location)) {
+    throw new AppError(400, 'LOCATION_INVALID', 'Choose a location from the host’s list');
   }
 
   const cap = room.maxPlayers || env.maxPlayersPerRoom;
@@ -56,7 +66,7 @@ export async function joinRoom(code, nickname, existingToken, stickerPref) {
   let player;
   try {
     player = await Player.create({
-      roomId: room._id, nickname, sticker, nicknameKey: nicknameKey(nickname),
+      roomId: room._id, nickname, sticker, location: location || '', nicknameKey: nicknameKey(nickname),
       tokenHash: sha256(token), tokenExpiresAt: new Date(Date.now() + env.roomInactivityMs),
     });
   } catch (err) {

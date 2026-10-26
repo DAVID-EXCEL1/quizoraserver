@@ -12,7 +12,7 @@ export const joinUrl = (code) => `${env.clientUrl}/join/${code}`;
 export const hostUrl = (code) => `${env.clientUrl}/host/${code}`;
 export const qrFor = (code) => QRCode.toDataURL(joinUrl(code), { margin: 1, width: 320, errorCorrectionLevel: 'M' });
 
-export async function createRoom(user, quizId) {
+export async function createRoom(user, { quizId, showQuestionsToPlayers = true, chatEnabled = true, locationOptions = [] }) {
   if (emailConfigured() && !user.emailVerified) {
     throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Verify your email address before hosting a game');
   }
@@ -38,7 +38,9 @@ export async function createRoom(user, quizId) {
     try {
       return await Room.create({
         code: generatePin(), hostId: user._id, quizId: quiz._id, snapshot, status: 'LOBBY',
-        maxPlayers: ent.limits.maxPlayersPerGame, features: { chat: chatOn, stickers: ent.features.stickers }, chatMode: chatOn ? settings.chat.defaultMode : 'off',
+        maxPlayers: ent.limits.maxPlayersPerGame, features: { chat: chatOn, stickers: ent.features.stickers },
+        chatMode: chatOn && chatEnabled ? (settings.chat.defaultMode === 'off' ? 'between' : settings.chat.defaultMode) : 'off',
+        showQuestionsToPlayers, locationOptions,
         lastActivityAt: new Date(now), expiresAt: new Date(now + env.roomInactivityMs),
       });
     } catch (err) {

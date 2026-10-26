@@ -19,6 +19,23 @@ const newRoom = async (n = 2) => { const q = await publishedQuiz(host, { n }); r
 const J = async (code, nick, sticker) => { const r = await request(app.server).post(`/api/rooms/${code}/join`).send({ nickname: nick, ...(sticker ? { sticker } : {}) }); return r; };
 
 describe('stickers and editable profiles', () => {
+  it('creates rooms with host options and restricts player locations to the host list', async () => {
+    const quiz = await publishedQuiz(host, { n: 1, title: 'Locations' });
+    const created = await host.post('/api/rooms', {
+      quizId: quiz.id, showQuestionsToPlayers: false, chatEnabled: false, locationOptions: ['London', 'Leeds'],
+    });
+    expect(created.status).toBe(201);
+    const { room, state } = created.body.data;
+    expect(state).toMatchObject({ showQuestionsToPlayers: false, chat: { enabled: false } });
+    expect((await request(app.server).get(`/api/rooms/${room.code}/public`)).body.data.locationOptions).toEqual(['London', 'Leeds']);
+    expect((await J(room.code, 'No Location')).body.error.code).toBe('LOCATION_REQUIRED');
+    expect((await request(app.server).post(`/api/rooms/${room.code}/join`).send({ nickname: 'Wrong Location', location: 'Paris' })).body.error.code).toBe('LOCATION_INVALID');
+    const joined = await request(app.server).post(`/api/rooms/${room.code}/join`).send({ nickname: 'London Player', location: 'London' });
+    expect(joined.status).toBe(201);
+    expect(joined.body.data.state.me.location).toBe('London');
+    expect((await host.get(`/api/rooms/${room.code}/host`)).body.data.state.players[0].location).toBe('London');
+  });
+
   it('exposes active sticker packs publicly', async () => {
     const c = (await request(app.server).get('/api/config')).body.data;
     expect(c.stickers.length).toBeGreaterThanOrEqual(4);

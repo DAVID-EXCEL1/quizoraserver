@@ -26,6 +26,7 @@ const roomSchema = new mongoose.Schema({
   features: { chat: { type: Boolean, default: true }, stickers: { type: Boolean, default: true } },
   chatMode: { type: String, enum: ['on', 'between', 'off'], default: 'between' },
   showQuestionsToPlayers: { type: Boolean, default: true },
+  locationOptions: { type: [String], default: [] },
   status: { type: String, enum: ROOM_STATUS, default: 'LOBBY' },
   currentQuestionIndex: { type: Number, default: -1 },
   scoredQuestionIndex: { type: Number, default: -1 },

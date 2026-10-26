@@ -30,7 +30,7 @@ async function hostPayload(room) {
 }
 
 r.post('/', requireAuth, csrfProtect, validate(createRoomSchema), asyncHandler(async (req, res) => {
-  const room = await rooms.createRoom(req.user, req.valid.body.quizId);
+  const room = await rooms.createRoom(req.user, req.valid.body);
   ok(res, await hostPayload(room), 201);
 }));
 
@@ -49,13 +49,13 @@ r.get('/:code/public', pinLookupLimiter, asyncHandler(async (req, res) => ok(res
 
 r.post('/:code/join', joinLimiter, validate(joinSchema), asyncHandler(async (req, res) => {
   const existing = (req.get('x-player-token') || '').slice(0, 200) || undefined;
-  const { player, room, token, reconnected } = await players.joinRoom(req.params.code, req.valid.body.nickname, existing, req.valid.body.sticker);
+  const { player, room, token, reconnected } = await players.joinRoom(req.params.code, req.valid.body.nickname, existing, req.valid.body.sticker, req.valid.body.location);
   if (!reconnected) {
     await players.broadcastRoster(room._id);
     toHostCtl(room._id, 'player:joined', { id: String(player._id), nickname: player.nickname });
     await game.pushHostState(room._id);
   }
-  ok(res, { token, reconnected, player: { id: String(player._id), nickname: player.nickname }, state: await playerView(room, player) }, reconnected ? 200 : 201);
+  ok(res, { token, reconnected, player: { id: String(player._id), nickname: player.nickname, location: player.location || '' }, state: await playerView(room, player) }, reconnected ? 200 : 201);
 }));
 
 r.get('/:code/state', requirePlayer, asyncHandler(async (req, res) => ok(res, await playerView(req.room, req.player))));
