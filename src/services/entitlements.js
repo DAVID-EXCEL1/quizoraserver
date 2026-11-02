@@ -4,8 +4,8 @@ import { AppError } from '../utils/errors.js';
 import { getSettings } from './settings.js';
 
 // Used when billing is switched off or no default plan exists: generous, bounded only by the server ceiling.
-const BUILTIN = { name: 'Standard', slug: 'standard', limits: { maxPlayersPerGame: -1, maxQuizzes: -1, maxQuestionsPerQuiz: -1, aiGenerationsPerMonth: -1 }, features: { chat: true, stickers: true, ai: true } };
-const LIMIT_KEYS = ['maxPlayersPerGame', 'maxQuizzes', 'maxQuestionsPerQuiz', 'aiGenerationsPerMonth'];
+const BUILTIN = { name: 'Standard', slug: 'standard', limits: { maxPlayersPerGame: -1, maxQuizzes: -1, maxQuestionsPerQuiz: -1, maxAiQuestionsPerGeneration: 20, aiGenerationsPerMonth: -1 }, features: { chat: true, stickers: true, ai: true } };
+const LIMIT_KEYS = ['maxPlayersPerGame', 'maxQuizzes', 'maxQuestionsPerQuiz', 'maxAiQuestionsPerGeneration', 'aiGenerationsPerMonth'];
 const LIVE_SUB = ['active', 'non_renewing', 'past_due'];
 
 /** What this host is currently allowed to do, resolved on the server every time. */
@@ -23,7 +23,12 @@ export async function entitlementsFor(userId) {
   }
   const base = plan || BUILTIN;
   const limits = { ...base.limits };
+  if (!Number.isInteger(limits.maxAiQuestionsPerGeneration)) {
+    const quizLimit = base.limits?.maxQuestionsPerQuiz || 20;
+    limits.maxAiQuestionsPerGeneration = base.isDefault ? 20 : quizLimit === -1 ? 100 : Math.min(100, Math.max(20, quizLimit));
+  }
   for (const k of LIMIT_KEYS) if (Number.isInteger(user?.planOverrides?.[k])) limits[k] = user.planOverrides[k];
+  limits.maxAiQuestionsPerGeneration = Math.min(100, Math.max(1, limits.maxAiQuestionsPerGeneration));
   limits.maxPlayersPerGame = limits.maxPlayersPerGame === -1 ? env.maxPlayersCeiling : Math.min(limits.maxPlayersPerGame, env.maxPlayersCeiling);
   const features = {
     chat: !!(settings.features.chat && base.features?.chat),

@@ -45,7 +45,7 @@ export const publicConfig = asyncHandler(async (req, res) => {
   ok(res, {
     features: s.features, chat: { maxLength: s.chat.maxLength }, currency: s.billing.currency,
     paymentsConfigured: paystackConfigured(), billingEnabled: s.features.billing,
-    aiMaxQuestions: s.ai.maxQuestions, stickers: s.features.stickers ? await groupedActive() : [],
+    stickers: s.features.stickers ? await groupedActive() : [],
     maxPlayersCeiling: env.maxPlayersCeiling,
     plans: plans.map(({ name, slug, description, priceMinor, currency, interval, limits, features, isDefault }) => ({
       name, slug, description, priceMinor, currency, interval, limits, features, isDefault,

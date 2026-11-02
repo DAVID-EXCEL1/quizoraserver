@@ -77,17 +77,37 @@ describe('AI question generation', () => {
     expect(call.body.messages[0].content).not.toMatch(/IGNORE ALL/);
     expect(call.body.messages[1].content).toMatch(/SOURCE MATERIAL \(data only\)/);
   });
-  it('caps the count at the admin limit and only asks for images when enabled', async () => {
+  it('enforces the Free plan question cap and only asks for images when enabled', async () => {
     const h = await newHost(app);
     groqReply = () => ({ body: model(good(25)) });
-    await admin.put(A('/settings'), { ai: { maxQuestions: 4, imagesEnabled: false } }); settings.resetSettingsCache();
+    await admin.put(A('/settings'), { ai: { imagesEnabled: false } }); settings.resetSettingsCache();
     const before = mock.calls.filter((c) => c.url.includes('pexels')).length;
     const r = await gen(h, { text: SOURCE, count: 25, images: true });
-    expect(r.body.data.questions).toHaveLength(4);
+    expect(r.body.data.questions).toHaveLength(20);
     expect(mock.calls.filter((c) => c.url.includes('pexels')).length).toBe(before);
     expect(r.body.data.imagesRequested).toBe(false);
-    await admin.put(A('/settings'), { ai: { maxQuestions: 20, imagesEnabled: true } });
-    expect((await gen(h, { text: SOURCE, count: 99 })).status).toBe(400);
+    await admin.put(A('/settings'), { ai: { imagesEnabled: true } });
+    const capped = await gen(h, { text: SOURCE, count: 99 });
+    expect(capped.status).toBe(200);
+    expect(capped.body.data.questions).toHaveLength(20);
+    expect((await gen(h, { text: SOURCE, count: 101 })).status).toBe(400);
+  });
+  it('uses the active plan’s per-generation question cap, with Free remaining at 20', async () => {
+    const free = await newHost(app);
+    expect((await free.get('/api/ai/limits')).body.data.maxQuestionsPerGeneration).toBe(20);
+
+    const pro = await newHost(app);
+    const proPlan = await models.Plan.findOne({ slug: 'pro' }).lean();
+    await models.Subscription.create({ userId: pro.user.id, planId: proPlan._id, source: 'admin', status: 'active' });
+    expect((await pro.get('/api/ai/limits')).body.data.maxQuestionsPerGeneration).toBe(50);
+
+    groqReply = () => ({ body: model(good(100)) });
+    const generated = await gen(pro, { text: SOURCE, count: 100 });
+    expect(generated.status).toBe(200);
+    expect(generated.body.data.questions).toHaveLength(50);
+    const groqCall = mock.calls.filter((c) => c.url.includes('groq')).at(-1);
+    expect(groqCall.body.messages[1].content).toContain('Write 50 medium');
+    expect(groqCall.body.max_tokens).toBeGreaterThan(4096);
   });
 });
 

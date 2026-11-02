@@ -11,6 +11,7 @@ const planSchema = new mongoose.Schema({
     maxPlayersPerGame: { type: Number, default: 10 },
     maxQuizzes: { type: Number, default: 5 },
     maxQuestionsPerQuiz: { type: Number, default: 10 },
+    maxAiQuestionsPerGeneration: { type: Number, default: 20, min: 1, max: 100 },
     aiGenerationsPerMonth: { type: Number, default: 3 },
   },
   features: { chat: { type: Boolean, default: true }, stickers: { type: Boolean, default: true }, ai: { type: Boolean, default: true } },

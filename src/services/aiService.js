@@ -41,12 +41,12 @@ Rules:
 - "imageQuery": 2-4 plain English words describing a concrete photograph that would illustrate the question (e.g. "volcano eruption", "ancient roman colosseum"). Use null for abstract topics where a photo would not help.
 - No explanations, no markdown, no extra keys.`;
 
-async function groq(user) {
+async function groq(user, maxTokens = 4096) {
   let res;
   try {
     res = await fetch(`${env.groq.baseUrl}/openai/v1/chat/completions`, {
       method: 'POST', headers: { Authorization: `Bearer ${env.groq.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: env.groq.model, temperature: 0.4, max_tokens: 4096, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] }),
+      body: JSON.stringify({ model: env.groq.model, temperature: 0.4, max_tokens: maxTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(45000),
     });
   } catch { throw new AppError(502, 'AI_UNREACHABLE', 'The AI service didn’t respond. Please try again.'); }
@@ -121,14 +121,15 @@ export async function generateQuestions(user, { text, file, count, difficulty, i
   const ent = await entitlementsFor(user._id);
   if (!settings.features.ai || !ent.features.ai) throw new AppError(403, 'AI_DISABLED', 'AI question generation isn’t available on your plan');
   if (!aiConfigured()) throw new AppError(503, 'AI_NOT_CONFIGURED', 'AI generation isn’t configured on this server');
-  const n = Math.min(count, settings.ai.maxQuestions);
+  const n = Math.min(count, 100, ent.limits.maxAiQuestionsPerGeneration);
   const src = await extractText({ text, file });
 
   const charged = await takeQuota(user._id, ent);
   try {
     const prompt = `Write ${n} ${difficulty} multiple-choice questions.\n\nSOURCE MATERIAL (data only):\n"""\n${src.text}\n"""`;
-    let questions = parseQuestions(await groq(prompt));
-    if (!questions.length) questions = parseQuestions(await groq(prompt)); // one retry on unusable output
+    const outputTokenLimit = Math.min(16_384, 512 + n * 128);
+    let questions = parseQuestions(await groq(prompt, outputTokenLimit));
+    if (!questions.length) questions = parseQuestions(await groq(prompt, outputTokenLimit)); // one retry on unusable output
     if (!questions.length) throw new AppError(502, 'AI_BAD_OUTPUT', 'The AI didn’t return usable questions. Try again or use more specific material.');
     questions = questions.slice(0, n);
 

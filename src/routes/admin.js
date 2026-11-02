@@ -65,7 +65,7 @@ const settingsBody = z.object({
   features: z.object({ chat: z.boolean(), stickers: z.boolean(), ai: z.boolean(), billing: z.boolean() }).partial().strict().optional(),
   chat: z.object({ maxLength: z.number().int().min(20).max(500), defaultMode: z.enum(['on', 'between', 'off']), cooldownMs: z.number().int().min(0).max(10000), blockedWords: z.array(z.string().trim().min(1).max(40)).max(300) }).partial().strict().optional(),
   billing: z.object({ currency: z.enum(['NGN', 'GHS', 'ZAR', 'KES', 'USD']) }).partial().strict().optional(),
-  ai: z.object({ maxQuestions: z.number().int().min(1).max(50), imagesEnabled: z.boolean() }).partial().strict().optional(),
+  ai: z.object({ imagesEnabled: z.boolean() }).partial().strict().optional(),
 }).strict();
 r.get('/settings', asyncHandler(async (req, res) => ok(res, { settings: await getSettings(), integrations: { paystack: !!env.paystack.secretKey, groq: !!env.groq.apiKey, pexels: !!env.pexelsKey, resend: !!(env.resend.apiKey && env.resend.from), cloudinary: !!env.cloudinary.cloudName } })));
 r.put('/settings', validate(settingsBody), asyncHandler(async (req, res) => ok(res, { settings: await svc.saveSettings(req.user, Object.fromEntries(Object.entries(req.valid.body).filter(([, v]) => v)), ip(req)) })));
@@ -82,7 +82,7 @@ const lim = (max) => z.number().int().min(-1).max(max);
 const planFields = {
   name: z.string().trim().min(1).max(60), slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]{2,40}$/, 'Use letters, numbers and dashes'), description: z.string().trim().max(300),
   priceMinor: z.number().int().min(0).max(1_000_000_000), currency: z.enum(['NGN', 'GHS', 'ZAR', 'KES', 'USD']), interval: z.enum(['monthly', 'yearly']),
-  limits: z.object({ maxPlayersPerGame: lim(env.maxPlayersCeiling), maxQuizzes: lim(100000), maxQuestionsPerQuiz: lim(1000), aiGenerationsPerMonth: lim(100000) }).partial().strict(),
+  limits: z.object({ maxPlayersPerGame: lim(env.maxPlayersCeiling), maxQuizzes: lim(100000), maxQuestionsPerQuiz: lim(1000), maxAiQuestionsPerGeneration: z.number().int().min(1).max(100), aiGenerationsPerMonth: lim(100000) }).partial().strict(),
   features: z.object({ chat: z.boolean(), stickers: z.boolean(), ai: z.boolean() }).partial().strict(),
   active: z.boolean(), isDefault: z.boolean(), sortOrder: z.number().int().min(0).max(1000),
 };
@@ -102,7 +102,7 @@ r.post('/users/:id/plan', id, validate(z.object({ planId: objectId, endsAt: z.st
   await svc.grantPlan(req.user, req.params.id, req.valid.body.planId, endsAt, ip(req)); done(res);
 }));
 r.delete('/users/:id/plan', id, asyncHandler(async (req, res) => { await svc.revokePlan(req.user, req.params.id, ip(req)); done(res); }));
-r.put('/users/:id/limits', id, validate(z.object({ maxPlayersPerGame: lim(env.maxPlayersCeiling).nullable(), maxQuizzes: lim(100000).nullable(), maxQuestionsPerQuiz: lim(1000).nullable(), aiGenerationsPerMonth: lim(100000).nullable() }).partial().strict()),
+r.put('/users/:id/limits', id, validate(z.object({ maxPlayersPerGame: lim(env.maxPlayersCeiling).nullable(), maxQuizzes: lim(100000).nullable(), maxQuestionsPerQuiz: lim(1000).nullable(), maxAiQuestionsPerGeneration: z.number().int().min(1).max(100).nullable(), aiGenerationsPerMonth: lim(100000).nullable() }).partial().strict()),
   asyncHandler(async (req, res) => { await svc.setOverrides(req.user, req.params.id, req.valid.body, ip(req)); done(res); }));
 
 /* ---- chat moderation inside a live room ---- */

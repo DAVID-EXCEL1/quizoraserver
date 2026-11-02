@@ -39,6 +39,7 @@ describe('default plans and server-side limits', () => {
     const h = await newHost(app);
     const o = (await h.get('/api/billing')).body.data;
     expect(o.plans.map((p) => p.slug)).toEqual(['free', 'pro', 'business']);
+    expect(o.plans.map((p) => p.limits.maxAiQuestionsPerGeneration)).toEqual([20, 50, 100]);
     expect(o.entitlements).toMatchObject({ source: 'free', plan: { slug: 'free' }, limits: { maxPlayersPerGame: 10, maxQuizzes: 5 } });
     expect(o.currency).toBe('NGN'); expect(o.paymentsConfigured).toBe(true);
     expect(JSON.stringify(o)).not.toMatch(/sk_test|paystackPlanCode|emailToken/);
@@ -47,6 +48,12 @@ describe('default plans and server-side limits', () => {
     expect(publicConfig.plans.map((p) => p.slug)).toEqual(['free', 'pro', 'business']);
     expect(publicConfig.plans[0]).toMatchObject({ name: 'Free', priceMinor: 0, limits: { maxPlayersPerGame: 10 }, features: { chat: true } });
     expect(JSON.stringify(publicConfig)).not.toMatch(/paystackPlanCode|hasPaystackPlan|sk_test|emailToken/);
+    expect(publicConfig.plans.map((p) => p.limits.maxAiQuestionsPerGeneration)).toEqual([20, 50, 100]);
+
+    const changed = await admin.patch(A(`/plans/${pro._id}`), { limits: { maxAiQuestionsPerGeneration: 60 } });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data.plan.limits.maxAiQuestionsPerGeneration).toBe(60);
+    await admin.patch(A(`/plans/${pro._id}`), { limits: { maxAiQuestionsPerGeneration: 50 } });
   });
   it('enforces quiz count and question limits with a clear upgrade message', async () => {
     const h = await newHost(app);
