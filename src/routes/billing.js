@@ -13,6 +13,7 @@ import { paystackConfigured } from '../services/paystack.js';
 import { env } from '../config/env.js';
 import { asyncHandler, ok } from '../utils/misc.js';
 import { log } from '../utils/logger.js';
+import { Plan } from '../models/index.js';
 
 const r = Router();
 r.use(requireAuth, csrfProtect);
@@ -37,6 +38,17 @@ export const paystackWebhook = [
 
 /** Public, non-secret config the SPA needs (feature switches, sticker packs). */
 export const publicConfig = asyncHandler(async (req, res) => {
-  const s = await getSettings();
-  ok(res, { features: s.features, chat: { maxLength: s.chat.maxLength }, currency: s.billing.currency, paymentsConfigured: paystackConfigured(), aiMaxQuestions: s.ai.maxQuestions, stickers: s.features.stickers ? await groupedActive() : [], maxPlayersCeiling: env.maxPlayersCeiling });
+  const [s, plans] = await Promise.all([
+    getSettings(),
+    Plan.find({ active: true }).select('name slug description priceMinor currency interval limits features isDefault sortOrder').sort({ sortOrder: 1, priceMinor: 1 }).lean(),
+  ]);
+  ok(res, {
+    features: s.features, chat: { maxLength: s.chat.maxLength }, currency: s.billing.currency,
+    paymentsConfigured: paystackConfigured(), billingEnabled: s.features.billing,
+    aiMaxQuestions: s.ai.maxQuestions, stickers: s.features.stickers ? await groupedActive() : [],
+    maxPlayersCeiling: env.maxPlayersCeiling,
+    plans: plans.map(({ name, slug, description, priceMinor, currency, interval, limits, features, isDefault }) => ({
+      name, slug, description, priceMinor, currency, interval, limits, features, isDefault,
+    })),
+  });
 });

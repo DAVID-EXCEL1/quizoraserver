@@ -42,6 +42,11 @@ describe('default plans and server-side limits', () => {
     expect(o.entitlements).toMatchObject({ source: 'free', plan: { slug: 'free' }, limits: { maxPlayersPerGame: 10, maxQuizzes: 5 } });
     expect(o.currency).toBe('NGN'); expect(o.paymentsConfigured).toBe(true);
     expect(JSON.stringify(o)).not.toMatch(/sk_test|paystackPlanCode|emailToken/);
+
+    const publicConfig = (await request(app.server).get('/api/config')).body.data;
+    expect(publicConfig.plans.map((p) => p.slug)).toEqual(['free', 'pro', 'business']);
+    expect(publicConfig.plans[0]).toMatchObject({ name: 'Free', priceMinor: 0, limits: { maxPlayersPerGame: 10 }, features: { chat: true } });
+    expect(JSON.stringify(publicConfig)).not.toMatch(/paystackPlanCode|hasPaystackPlan|sk_test|emailToken/);
   });
   it('enforces quiz count and question limits with a clear upgrade message', async () => {
     const h = await newHost(app);
